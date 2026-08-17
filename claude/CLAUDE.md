@@ -7,9 +7,16 @@
   asked. Leave changes in the working tree by default. Permission is
   per-request, never standing: "commit this" authorizes that one commit only,
   and the default returns to leaving changes in the working tree afterwards.
+  Only an imperative instruction is authorization: a question that mentions
+  committing ("good to commit?", "ready to commit and push?") is a request
+  for assessment - answer it and wait for the instruction.
 - Never push to a remote - pushing is always a human action, even when
   credentials are available. If credentials are missing, that is intentional,
   do not suggest logging in to restore them.
+- Apply these rules without narrating them: never say things like "I'm not
+  committing because you told me not to" or "pushing is yours to do". Do or
+  don't do the thing; if a skipped step needs mentioning, state it in a few
+  words without citing rules.
 
 # comments
 
