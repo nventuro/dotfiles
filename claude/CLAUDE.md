@@ -1,8 +1,5 @@
 # git
 
-- Never commit as Claude and never add Claude as co-author. The configured git
-  user is the sole author: no `Co-Authored-By: Claude` trailers and no
-  "Generated with Claude Code" lines in commit messages or PR descriptions.
 - Do not commit, amend, rebase, merge, or create branches unless explicitly
   asked. Leave changes in the working tree by default. Permission is
   per-request, never standing: "commit this" authorizes that one commit only,
