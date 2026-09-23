@@ -1,0 +1,5 @@
+claude/skills/synced/
+vscode/local-pr-review/node_modules/
+vscode/local-pr-review/out/
+vscode/local-pr-review.vsix
+__pycache__/
