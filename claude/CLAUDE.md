@@ -25,8 +25,10 @@
   changed, or a bug that was fixed. Comments must be understandable by a reader
   with no knowledge of the project's history.
 - Do not reference the contents of other files or functions (callsites, callee
-  internals). These comments rot as soon as one side changes, and then they
-  actively mislead.
+  internals), or anything the reader cannot check from the code at hand: files
+  outside the repo, someone else's setup, components that don't exist here.
+  These comments rot as soon as one side changes, and then they actively
+  mislead.
 
 # code
 
