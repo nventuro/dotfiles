@@ -55,17 +55,21 @@ ask the user which base to use.
 
 Collect concise context for Codex:
 
-- repo path and current branch
-- selected scope
-- base branch
-- user goal or issue being solved
-- changed files
-- tests, builds, or CI already run and their results
-- CI failure URLs or log excerpts, if relevant
-- areas Claude suspects are risky
+- the goal of the change or the issue it solves
+- tests, builds, or CI already run and their results (with CI failure URLs or
+  log excerpts, if relevant)
+- **assumptions and decisions**, only when this session wrote or changed the
+  code under review: the things taken for granted without checking, and the
+  design choices made. Write each as a concrete, checkable claim about the
+  code ("`parse` is only ever called with trimmed input", "kept the cache
+  write synchronous so readers never see a stale entry"). If this session did
+  not write the code (a fresh session, someone else's PR), leave this out
+  rather than guess.
 
-Do not paste the full diff unless the user is asking to review an external PR
-that Codex cannot inspect locally. Codex should read the checkout itself.
+Do not add your own opinions of what looks risky, and do not list the changed
+files: Codex enumerates the changes itself, and its value is an independent
+read. Do not paste the full diff unless the user is asking to review an
+external PR that Codex cannot inspect locally.
 
 Useful commands:
 
@@ -95,6 +99,7 @@ repo_root=$(git rev-parse --show-toplevel)
 
 If a Codex CLI is available and the user wants Claude to invoke it, run
 `codex review` from `$repo_root` with the prompt as the positional argument.
+Otherwise print the prompt for the user to paste into Codex.
 
 One constraint (codex-cli 0.142+): **the scope flags (`--uncommitted`,
 `--base`) cannot be combined with a custom prompt** — `codex review
@@ -117,36 +122,40 @@ read-only review of a trusted local repo:
 codex review -c 'sandbox_mode="danger-full-access"' "$PROMPT"
 ```
 
-Build `$PROMPT` with the scope stated up front, e.g. for uncommitted scope
-start it with: "Review the current UNCOMMITTED local changes in this
-repository (staged + unstaged + untracked). Use `git status --porcelain` and
-`git diff HEAD` to enumerate them." For branch/PR scope, name the base branch
-and instruct `git diff <base>...HEAD` instead.
-
-Otherwise print the prompt for the user to paste into Codex. Never use a
-hardcoded checkout path; use `$repo_root` in the prompt.
+Build `$PROMPT` from the template below. The first paragraph states the scope:
+use the uncommitted form shown, or for branch/PR scope "Review the changes on
+this branch against `<base>`; enumerate them with `git diff <base>...HEAD`."
+Omit the Goal or Already-run line when there is nothing concrete for it, and
+omit the whole assumptions section when step 3 left it out.
 
 ```text
-Please review the current local changes in <repo_root>.
+Review the current UNCOMMITTED changes in this repository (staged, unstaged
+and untracked); enumerate them with `git status --porcelain` and `git diff HEAD`.
 
-Context from Claude:
-- Goal: ...
-- Scope: ...
-- Base branch: ...
-- Current branch: ...
-- Relevant files: ...
-- Tests/CI: ...
-- Suspected risky areas: ...
+Goal of the change: ...
+Already run: ...
 
-Use a code-review stance: findings first, ordered by severity, with file/line references.
-Verify against the local checkout. Do not rely only on this summary.
-Check behavior, missing tests, generated/vendor file hazards, base-branch correctness, and repo conventions.
-Do not edit files unless explicitly asked after the review.
+Assumptions and decisions made while writing this change. None of them has
+been verified. Treat each as suspect: check it against the code and its
+callers, and report it as a finding if it is wrong. Report a decision only if
+it causes a bug or clearly worse behavior, not because you would have chosen
+differently. These are a starting point, not the scope: review the whole change.
+- ...
 
-After the prose review, also output a fenced ```json block: an array of findings, each
-{ "file": <path>, "line": <n>, "severity": <str>, "body": <one-line finding>,
-  "suggestion": { "before": <exact current lines>, "after": <fixed lines> } | null }.
-Use suggestion only for a concrete code change; before must be byte-exact.
+Report only problems worth fixing before this merges: bugs, unhandled edge
+cases, security issues, broken error handling, missing tests for new
+behavior, and names that mislead or could be clearer. Skip formatting and
+other style. Leave out anything you are unsure of; an empty result is fine.
+Do not modify files.
+
+Output only a fenced ```json array. Each finding:
+{ "file": <repo-relative path>,
+  "line": <first line, numbered in the current file>,
+  "end_line": <last line, if more than one>,
+  "severity": "high" | "medium" | "low",
+  "body": <one sentence>,
+  "suggestion": { "before": <exact current lines, unique in the file>,
+                  "after": <replacement lines> } | null }
 ```
 
 If the review target is an external PR or branch that is not checked out
@@ -161,8 +170,9 @@ python3 ~/.claude/scripts/local-review-post.py status
 ```
 
 **If `active: true` → post Codex's findings as inline threads** (don't just print them):
-- Parse the ```json findings block Codex returned. For each, build
-  `{ "file", "line", "author": "codex", "body" }`. `body` = `"[<severity>] (codex) <body>"`,
+- Parse the ```json array Codex returned. For each, build
+  `{ "file", "line", "endLine": <end_line, or line when absent>, "author": "codex", "body" }`.
+  `body` = `"[<severity>] (codex) <body>"`,
   plus — when the finding has a `suggestion` `{before, after}` — a verbatim-applicable block
   (`/apply-review` applies it as-is):
   ````
@@ -179,7 +189,7 @@ python3 ~/.claude/scripts/local-review-post.py status
   Refresh**, review/edit/resolve, then `/apply-review`."
 
 **Else** (no active review): present Codex findings without rewriting their substance,
-discard only what's clearly invalid, ask whether to apply fixes, and if so clarify whether
-Claude or Codex implements them.
+discard only what's clearly invalid, and ask whether to apply fixes. Claude implements
+any that are accepted; Codex only reviews.
 
 Do not post to GitHub unless the user explicitly asks.

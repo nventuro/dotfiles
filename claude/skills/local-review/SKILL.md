@@ -31,8 +31,8 @@ agents read them themselves.
     Fable/Opus/Sonnet/Default options).
   - Team learnings freshness (only if `team-learnings.md` is >24h old:
     Update via `/learn-from-prs` / Use current).
-- Write the diff once to `/tmp/review-diff.txt` using review-as-team's step-3
-  commands for the chosen scope.
+- Write the diff once, to a fresh file created as in review-as-team step 3, using
+  its commands for the chosen scope. That path is `<diff>` below.
 
 The sub-skills invoked below must not re-ask any of these or rewrite the diff —
 enter them at the step noted.
@@ -48,25 +48,38 @@ step 3 proceeds while Codex works.
 
 Send both in a single message:
 
-**Learnings agent** — one Agent call (`general-purpose`, step-1 model), prompted
-to:
+**Learnings agent** — one Agent call (`general-purpose`, step-1 model). Its prompt
+is this template, with `<diff>`, `<repo_root>` (`git rev-parse --show-toplevel`)
+and review-as-team's step-4 output spec filled in:
 
-- Read `/tmp/review-diff.txt` and `~/.claude/local-review/my-learnings.md`
-  in full.
-- Flag only violations of rules documented there — no invented concerns. Each
-  finding names the matched rule's bold headline.
-- Return review-as-team's finding-schema JSON array and nothing else
-  (`flagged_by: ["learnings"]`; empty array if clean).
+```text
+Review the diff in <diff> against the user's own coding rules in
+~/.claude/local-review/my-learnings.md. Read both in full.
+
+The repository is checked out at <repo_root>; paths in the diff are relative
+to it. Read the changed files there whenever a rule depends on the
+surrounding code, unless the diff is of a PR that is not checked out here, in
+which case work from the diff alone and leave "suggestion" null.
+
+Flag only changed code that breaks a rule written in that file. Raise nothing
+the file does not cover, and leave out matches you are unsure of. An empty
+result is fine.
+
+<output spec>
+Set "rule" to the bold headline of the rule broken, and "flagged_by" to
+["learnings"].
+```
 
 **Team pass** — invoke `review-as-team` entering at its step 4 (reviewer agent,
-step-1 model), and collect its findings instead of letting it post.
+step-1 model, the same `<diff>`), and collect its findings instead of letting it
+post.
 
 ## 4. Merge and post
 
 Merge both result sets per review-as-team step 5 (same file/line + equivalent
 issue → one finding, union `flagged_by`), then post them per its step-6 Local PR
-Review mode. Author is `learnings` when only the learnings pass flagged it,
-`team` otherwise.
+Review mode. Author is `learnings` when only the learnings pass flagged it, with a
+body starting `"[<category>] (learnings: <rule>) <body>"`; `team` otherwise.
 
 ## 5. Integrate Codex
 

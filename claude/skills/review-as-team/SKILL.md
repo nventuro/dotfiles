@@ -15,7 +15,7 @@ the terminal.
 
 - Learnings: `~/.claude/local-review/team-learnings.md`
 - Tracker:   `~/.claude/local-review/team-learnings-tracker.json`
-- Diff file: `/tmp/review-diff.txt`
+- Diff file: a fresh file per run, created in step 3
 
 **Do NOT read the learnings file or diff content into main context.**
 The reviewer agent reads them itself.
@@ -72,7 +72,15 @@ Map the model choice in step 4:
 If exactly one scope has content, use it automatically and announce the
 selection — only the model question is asked.
 
-### 3. Write diff to `/tmp/review-diff.txt`
+### 3. Write the diff
+
+Create a fresh file for this run's diff, so reviews running at the same time in
+other worktrees don't overwrite each other's. Use the path it prints, written
+out literally, wherever `<diff>` appears below:
+
+```bash
+mktemp -t review-diff.XXXXXX
+```
 
 "Uncommitted" means unstaged + staged + untracked. Define these helpers once
 before running any of the commands below. `show_untracked` surfaces untracked
@@ -99,38 +107,54 @@ the reviewer as a phantom `+` finding.
 
 | Scope        | Command |
 |--------------|---------|
-| Uncommitted  | `{ git diff -U1 HEAD; show_untracked; } > /tmp/review-diff.txt` |
-| All unpushed | `{ git diff -U1 --merge-base @{u}; show_untracked; } > /tmp/review-diff.txt` (fall back to `--merge-base "origin/$(base_branch)"` if no upstream) |
-| PR / external PR | `gh pr diff <N> > /tmp/review-diff.txt` |
-| Full branch  | `BASE=$(git merge-base "origin/$(base_branch)" HEAD); { git diff -U1 $BASE; show_untracked; } > /tmp/review-diff.txt` |
+| Uncommitted  | `{ git diff -U1 HEAD; show_untracked; } > <diff>` |
+| All unpushed | `{ git diff -U1 --merge-base @{u}; show_untracked; } > <diff>` (fall back to `--merge-base "origin/$(base_branch)"` if no upstream) |
+| PR / external PR | `gh pr diff <N> > <diff>` |
+| Full branch  | `BASE=$(git merge-base "origin/$(base_branch)" HEAD); { git diff -U1 $BASE; show_untracked; } > <diff>` |
 
 ### 4. Run the reviewer agent
 
-Single Agent call, `subagent_type: "general-purpose"`. Pass `model` based on
-the step-2 selection (Fable / Opus / Sonnet; Default → omit). Prompt instructs
-the agent to:
+Single Agent call, `subagent_type: "general-purpose"`, with `model` from the
+step-2 selection (Fable / Opus / Sonnet; Default → omit). Its prompt is the
+template below, with `<diff>`, `<repo_root>` (`git rev-parse --show-toplevel`)
+and the output spec filled in:
 
-- Read `/tmp/review-diff.txt` for the diff.
-- Read the learnings file at the path above.
-- Apply every top-level `## <name>` reviewer section to the diff.
-  Skip `## Other Reviewers` and `## Cross-Reviewer Themes`.
-- For each issue, tag `flagged_by` with every reviewer whose pattern
-  matched (e.g. `["alice", "bob"]`).
-- Return a single JSON array, nothing else. Empty array if no findings.
-- Do not narrate approvals or comment on what was fine.
+```text
+Review the diff in <diff> the way the user's teammates would, using the review
+patterns in ~/.claude/local-review/team-learnings.md. Read both in full. Each
+`## <login>` section holds one reviewer's patterns; apply every section.
 
-**Finding schema**:
-```json
-{
-  "category": "Naming|Security|Clarity|ApiDesign|Architecture|Style|...",
-  "file": "path/to/file.ts",
-  "line": 42,
-  "issue": "short description of the problem",
-  "fix": "short description of the change",
-  "preview_before": "3-8 lines of context around the issue",
-  "preview_after": "the same lines with the fix applied",
-  "flagged_by": ["alice", "..."]
-}
+The repository is checked out at <repo_root>; paths in the diff are relative
+to it. Read the changed files there whenever a pattern depends on the
+surrounding code, unless the diff is of a PR that is not checked out here, in
+which case work from the diff alone and leave "suggestion" null.
+
+Flag only changed code that matches a documented pattern. Raise nothing the
+file does not cover, and leave out matches you are unsure of. An empty result
+is fine.
+
+<output spec>
+Set "rule" to the bold headline of the pattern matched, and "flagged_by" to
+every reviewer whose pattern it matches.
+```
+
+**Output spec**, pasted where a template says `<output spec>` (the learnings
+pass in `/local-review` uses it too):
+
+```text
+Output only a fenced ```json array. Each finding:
+{ "file": <repo-relative path>,
+  "line": <first line, numbered in the current file>,
+  "end_line": <last line, if more than one>,
+  "category": "Security" | "Correctness" | "ApiDesign" | "Architecture"
+              | "Clarity" | "Naming" | "Style",
+  "rule": <see below>,
+  "flagged_by": [<see below>],
+  "body": <one or two sentences: what is wrong here and what to change>,
+  "suggestion": { "before": <lines copied exactly from the current file, as
+                             few as needed, unique in the file>,
+                  "after": <replacement lines> } | null }
+Use a suggestion only for a concrete code change.
 ```
 
 ### 5. Merge + sort
@@ -138,7 +162,7 @@ the agent to:
 - If two findings share `(file, line)` and the issues look equivalent,
   merge them and union their `flagged_by` arrays.
 - Sort by priority (Security/Correctness > ApiDesign > Architecture >
-  Clarity > Style), then file path, then line number.
+  Clarity > Naming > Style), then file path, then line number.
 - Number sequentially `#1..#N`.
 
 ### 6. Present the findings
@@ -150,21 +174,21 @@ python3 ~/.claude/scripts/local-review-post.py status
 
 **If `active: true` → Local PR Review mode.** Post the findings as inline threads
 instead of asking in the terminal, then stop:
-- Build a JSON array; each item `{ "file": <path>, "line": <n>, "author": "team",
-  "body": <markdown> }`.
-- `body` starts `"[<category>] (team, flagged by <names>) <issue>"`. For a concrete
-  fix, append a suggestion block (the extension's format; `/apply-review` applies it
-  verbatim) built from the finding's `preview_before`/`preview_after`:
+- Build a JSON array; each item `{ "file": <path>, "line": <line>, "endLine":
+  <end_line, or line when absent>, "author": "team", "body": <markdown> }`.
+- `body` starts `"[<category>] (team, flagged by <names>: <rule>) <body>"`. When the
+  finding has a `suggestion`, append a suggestion block (the extension's format;
+  `/apply-review` applies it verbatim), with one `- ` line per line of `before` and
+  one `+ ` line per line of `after`:
   ````
   💡 **Suggestion:**
 
   ```diff
-  - <preview_before — the exact current lines>
-  + <preview_after — the lines with the fix>
+  - <before>
+  + <after>
   ```
   ````
-  Omit the block for a question/note finding. Keep `preview_before` byte-exact so the
-  verbatim edit matches.
+  Copy `before` unchanged so the verbatim edit matches.
 - Post: `printf '%s' "$FINDINGS_JSON" | python3 ~/.claude/scripts/local-review-post.py post`
 - Tell the user: "Posted N findings to Local PR Review — run **Local PR Review:
   Refresh**, review/edit/resolve, then `/apply-review`." **Then stop** — do not run
@@ -179,10 +203,9 @@ Print:
 
 Build one `AskUserQuestion` per finding:
 - `header`: `"#X [Category]"` (truncate category to 12 chars).
-- `question`: `"<issue> (<file>:<line>, flagged by <names>)"`.
-- `preview`: a code fence showing `preview_before` with line numbers
-  and a short annotation, followed by `**Fix:** ...` and a fence with
-  `preview_after`.
+- `question`: `"<body> (<file>:<line>, flagged by <names>)"`.
+- `preview`: when the finding has a `suggestion`, a code fence with its `before`
+  (with line numbers) and one with its `after`; otherwise the matched `rule`.
 - `multiSelect`: false.
 - options: `Apply` (apply the suggested fix) / `Skip` (leave as-is).
 
@@ -193,7 +216,8 @@ user instructions for that finding.
 ### 7. Apply
 
 - Plan mode: present a plan summarizing the selected changes.
-- Otherwise: apply each "Apply" via Edit/Write. After each, print
+- Otherwise: apply each "Apply" via Edit/Write — the `suggestion` verbatim when
+  there is one, else the change `body` describes. After each, print
   `Applied [X/N]: <short>`. Apply "Other" per the user's instructions.
 
 ### 8. Summary
@@ -204,6 +228,6 @@ Review complete. Applied X/N recommendations, skipped Y.
 
 ## Guidelines
 
-- Priority order: Security/Correctness > ApiDesign > Architecture > Clarity > Style.
+- Priority order: Security/Correctness > ApiDesign > Architecture > Clarity > Naming > Style.
 - Only flag patterns documented in the learnings file. Don't invent concerns.
 - Do NOT post to GitHub.
