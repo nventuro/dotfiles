@@ -175,7 +175,7 @@ python3 ~/.claude/scripts/local-review-post.py status
 **If `active: true` → post Codex's findings as inline threads** (don't just print them):
 - Parse the ```json array Codex returned. For each, build
   `{ "file", "line", "endLine": <end_line, or line when absent>, "author": "codex", "body" }`.
-  `body` = `"[<severity>] (codex) <body>"`,
+  `body` = `"[<severity>] (codex)\n\n<body>"`,
   plus — when the finding has a `suggestion` `{before, after}` — a verbatim-applicable block
   (`/apply-review` applies it as-is):
   ````

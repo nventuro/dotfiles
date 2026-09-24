@@ -176,7 +176,7 @@ python3 ~/.claude/scripts/local-review-post.py status
 instead of asking in the terminal, then stop:
 - Build a JSON array; each item `{ "file": <path>, "line": <line>, "endLine":
   <end_line, or line when absent>, "author": "team", "body": <markdown> }`.
-- `body` starts `"[<category>] (team, flagged by <names>: <rule>) <body>"`. When the
+- `body` starts `"[<category>] (team, flagged by <names>: <rule>)\n\n<body>"`. When the
   finding has a `suggestion`, append a suggestion block (the extension's format;
   `/apply-review` applies it verbatim), with one `- ` line per line of `before` and
   one `+ ` line per line of `after`:

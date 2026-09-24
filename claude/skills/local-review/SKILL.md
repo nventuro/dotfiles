@@ -87,7 +87,7 @@ second opinion rather than a re-read of Claude's own work.
 Merge the learnings and team results per review-as-team step 5 (same file/line
 + equivalent issue → one finding, union `flagged_by`), then post them per its
 step-6 Local PR Review mode. Author is `learnings` when only the learnings pass
-flagged it, with a body starting `"[<category>] (learnings: <rule>) <body>"`;
+flagged it, with a body starting `"[<category>] (learnings: <rule>)\n\n<body>"`;
 `team` otherwise.
 
 Hold the claude agent's findings until Codex finishes (step 5).
@@ -100,10 +100,10 @@ independently, so a finding both raised is the strongest signal of the run:
 
 - A finding both raised (same file, overlapping lines, same issue) becomes one
   thread, authored `claude`, with a body starting
-  `"[<higher severity>] (claude, codex agree) <body>"` and the more concrete of
+  `"[<higher severity>] (claude, codex agree)\n\n<body>"` and the more concrete of
   the two suggestions.
 - Every other finding keeps its own reviewer as author, with a body starting
-  `"[<severity>] (<reviewer>) <body>"`.
+  `"[<severity>] (<reviewer>)\n\n<body>"`.
 
 Drop any finding equivalent to one posted in step 4, then post the rest the way
 review-as-codex step 5 posts Codex's.
