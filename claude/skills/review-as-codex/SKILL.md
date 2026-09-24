@@ -98,20 +98,23 @@ repo_root=$(git rev-parse --show-toplevel)
 ```
 
 If a Codex CLI is available and the user wants Claude to invoke it, run
-`codex review` from `$repo_root` with the prompt as the positional argument.
+`codex exec` from `$repo_root` with the prompt as the positional argument.
 Otherwise print the prompt for the user to paste into Codex.
 
-One constraint (codex-cli 0.142+): **the scope flags (`--uncommitted`,
-`--base`) cannot be combined with a custom prompt** — `codex review
---uncommitted <prompt>` (and the stdin `-` form) both fail with `the argument
-'--uncommitted' cannot be used with '[PROMPT]'`. So when passing Claude's
-context prompt, pass ONLY the prompt and encode the scope inside it (tell Codex
-which changes to review and how to enumerate them, e.g. `git status
---porcelain` + `git diff HEAD` for uncommitted work). Use the bare flag forms
-only when sending no prompt.
+Use `codex exec`, not `codex review`: review mode prints its findings in its
+own fixed text format, ignoring both the prompt's output instructions and
+`--output-schema`. `codex exec --output-schema` constrains Codex's final
+message to the findings JSON, and `-o` writes that message alone to a file.
+`codex exec` has no scope flags, so the prompt states which changes to review
+and how to enumerate them. Redirect its stdin from `/dev/null`: with stdin open
+it waits to read more prompt from it and never starts.
+
+Create a fresh file for Codex's findings (`mktemp -t codex-findings.XXXXXX`)
+and use the path it prints, written out literally, as `<findings>`:
 
 ```bash
-codex review "$PROMPT"
+codex exec --output-schema ~/.claude/skills/review-as-codex/findings-schema.json \
+  -o <findings> "$PROMPT" < /dev/null
 ```
 
 If Codex answers that it could not inspect the local checkout because of a
@@ -119,7 +122,9 @@ sandbox setup error, rerun with the sandbox disabled — acceptable for a
 read-only review of a trusted local repo:
 
 ```bash
-codex review -c 'sandbox_mode="danger-full-access"' "$PROMPT"
+codex exec -c 'sandbox_mode="danger-full-access"' \
+  --output-schema ~/.claude/skills/review-as-codex/findings-schema.json \
+  -o <findings> "$PROMPT" < /dev/null
 ```
 
 Build `$PROMPT` from the template below, with `<repo_root>` set to `$repo_root`.
@@ -173,8 +178,8 @@ python3 ~/.claude/scripts/local-review-post.py status
 ```
 
 **If `active: true` → post Codex's findings as inline threads** (don't just print them):
-- Parse the ```json array Codex returned. For each, build
-  `{ "file", "line", "endLine": <end_line, or line when absent>, "author": "codex", "body" }`.
+- Read the `findings` array from `<findings>`. For each, build
+  `{ "file", "line", "endLine": <end_line, or line when null>, "author": "codex", "body" }`.
   `body` = `"[<severity>] (codex)\n\n<body>"`,
   plus — when the finding has a `suggestion` `{before, after}` — a verbatim-applicable block
   (`/apply-review` applies it as-is):

@@ -43,7 +43,7 @@ enter them at the step noted.
 
 Invoke `review-as-codex` with the chosen scope now — it is the slowest pass.
 Follow it through context gathering and prompt building (skip its scope
-detection), then launch the `codex review` command with `run_in_background` so
+detection), then launch its `codex exec` command with `run_in_background` so
 step 3 proceeds while Codex works.
 
 ## 3. Learnings, team and claude passes in parallel
