@@ -39,9 +39,10 @@ export async function activate(context: vscode.ExtensionContext) {
   // Register custom URI scheme for git file content
   const gitFileContentProvider = new GitFileContentProvider(gitService);
   context.subscriptions.push(
-    vscode.workspace.registerTextDocumentContentProvider(
+    vscode.workspace.registerFileSystemProvider(
       "git-local-review",
       gitFileContentProvider,
+      { isReadonly: true, isCaseSensitive: true },
     ),
   );
 
@@ -73,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext) {
         return undefined;
       }
       // A stable per-path URI whose CONTENT is the current snapshot — so firing
-      // the content provider's onDidChange (in refreshNow) makes the gutter
+      // the content provider's change event (in refreshNow) makes the gutter
       // recompute after a hunk is marked, without changing the URI.
       return vscode.Uri.parse(
         `git-local-review://authority/${filePath}?snapshot=1`,
