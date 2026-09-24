@@ -3,14 +3,18 @@
 Fetch and filter high-signal PRs for review pattern analysis.
 
 Usage:
-  learn-from-prs.py fetch [--batch-size N] [--since YYYY-MM-DD]
+  learn-from-prs.py fetch [--since YYYY-MM-DD]
     Fetch merged PRs across the configured repos, filter to high-signal,
-    output unprocessed ones. Each entry carries the repo it came from.
+    output all unprocessed ones. Each entry carries the repo it came from.
     --since bounds the search (default: the last 180 days).
 
-  learn-from-prs.py fetch-comments <repo#pr> [<repo#pr> ...]
-    Fetch inline review comments + PR comments for specific PRs. A bare
-    number is read as a PR in the first configured repo.
+  learn-from-prs.py fetch-comments [--out-dir DIR] <repo#pr> [<repo#pr> ...]
+    Fetch the teammates' review bodies, discussion comments and inline
+    comments on specific PRs, excluding the PR author's own. PRs with none
+    are left out. With --out-dir, writes them to DIR/comments-batchN.json in
+    batches sized for one map-stage agent each and prints the batch list;
+    otherwise prints them all. A bare number is read as a PR in the first
+    configured repo.
 
 Reads tracker from TRACKER_PATH env var (or default).
 Outputs JSON to stdout, progress to stderr.
@@ -28,6 +32,7 @@ from local_review_config import TEAM_TRACKER, load as load_config
 _config = load_config()
 # The user plus the teammates whose reviews we learn from.
 AUTHORS = [_config["login"], *_config["teammates"]]
+TEAMMATES = set(_config["teammates"])
 # PRs are identified as "<repo>#<number>" throughout, because PR numbers
 # collide across repos.
 REPOS = _config["repos"]
@@ -39,6 +44,14 @@ DEFAULT_REPO = REPOS[0]
 # history of every author's merged PRs would take a long time.
 DEFAULT_SINCE_DAYS = 180
 DEFAULT_TRACKER = str(TEAM_TRACKER)
+
+# GitHub's diff hunk ends at the commented line but can start hundreds of lines
+# above it, and it dominates the size of the review data.
+HUNK_TAIL_LINES = 8
+# Sized so a map-stage agent can read a whole batch and emit a bullet per
+# comment within its context and output limits.
+MAX_BATCH_COMMENTS = 100
+MAX_BATCH_CHARS = 100_000
 
 
 def log(msg):
@@ -139,7 +152,9 @@ def fetch_inline_comments(repo, pr_number):
             "body": c.get("body", ""),
             "path": c.get("path", ""),
             "line": c.get("line") or c.get("original_line"),
-            "diff_hunk": c.get("diff_hunk", ""),
+            "diff_hunk": "\n".join(
+                c.get("diff_hunk", "").splitlines()[-HUNK_TAIL_LINES:]
+            ),
         }
         for c in comments
         if c.get("body", "").strip()
@@ -158,7 +173,7 @@ def fetch_pr_reviews_and_comments(repo, pr_number):
     return json.loads(out)
 
 
-def cmd_fetch(batch_size, since):
+def cmd_fetch(since):
     tracker = read_tracker()
     processed = set(tracker["processed"])
 
@@ -216,50 +231,100 @@ def cmd_fetch(batch_size, since):
         elif (i + 1) % 25 == 0:
             log(f"  [{i+1}/{len(sorted_keys)}] checked...")
 
-    # Sort by signal desc, take batch_size
+    # Every high-signal PR is returned: the next fetch only searches PRs merged
+    # after this run, so any left out here would never be learned from.
     high_signal.sort(key=lambda x: -x["signal"])
-    batch = high_signal[:batch_size]
 
-    log(f"\nHigh-signal: {len(high_signal)}, batch: {len(batch)}")
-    json.dump(batch, sys.stdout, indent=2)
+    log(f"\nHigh-signal: {len(high_signal)}")
+    json.dump(high_signal, sys.stdout, indent=2)
 
 
-def cmd_fetch_comments(prs):
+def fetch_teammate_comments(repo, pr_number):
+    """The PR's title and author plus the review bodies, discussion comments
+    and inline comments teammates left on it, excluding the author's own."""
+    pr_data = fetch_pr_reviews_and_comments(repo, pr_number)
+    author = pr_data.get("author", {}).get("login", "?")
+
+    def by_teammate(user, body):
+        return user in TEAMMATES and user != author and body.strip()
+
+    return {
+        "repo": repo,
+        "number": pr_number,
+        "title": pr_data.get("title", "?"),
+        "author": author,
+        "reviews": [
+            {
+                "user": r["author"]["login"],
+                "state": r["state"],
+                "body": r.get("body", ""),
+            }
+            for r in pr_data.get("reviews", [])
+            if by_teammate(r["author"]["login"], r.get("body", ""))
+        ],
+        "comments": [
+            {
+                "user": c["author"]["login"],
+                "body": c["body"],
+            }
+            for c in pr_data.get("comments", [])
+            if by_teammate(c["author"]["login"], c["body"])
+        ],
+        "inline_comments": [
+            c for c in fetch_inline_comments(repo, pr_number)
+            if by_teammate(c["user"], c["body"])
+        ],
+    }
+
+
+def comment_count(pr):
+    return len(pr["reviews"]) + len(pr["comments"]) + len(pr["inline_comments"])
+
+
+def pack_batches(prs):
+    """Groups PRs into batches within the comment and size budgets. PRs are
+    never split, so a PR over budget on its own gets a batch to itself."""
+    batches, batch, n_comments, n_chars = [], {}, 0, 0
+    for key, pr in prs.items():
+        pr_comments, pr_chars = comment_count(pr), len(json.dumps(pr))
+        if batch and (n_comments + pr_comments > MAX_BATCH_COMMENTS
+                      or n_chars + pr_chars > MAX_BATCH_CHARS):
+            batches.append(batch)
+            batch, n_comments, n_chars = {}, 0, 0
+        batch[key] = pr
+        n_comments += pr_comments
+        n_chars += pr_chars
+    if batch:
+        batches.append(batch)
+    return batches
+
+
+def cmd_fetch_comments(prs, out_dir):
     results = {}
     for i, (repo, num) in enumerate(prs):
         key = pr_key(repo, num)
         log(f"[{i+1}/{len(prs)}] Fetching {key}...")
-        pr_data = fetch_pr_reviews_and_comments(repo, num)
-        inline = fetch_inline_comments(repo, num)
-        results[key] = {
-            "repo": repo,
-            "number": num,
-            "title": pr_data.get("title", "?"),
-            "author": pr_data.get("author", {}).get("login", "?"),
-            "reviews": [
-                {
-                    "user": r["author"]["login"],
-                    "state": r["state"],
-                    "body": r.get("body", ""),
-                }
-                for r in pr_data.get("reviews", [])
-                if r.get("body", "").strip()
-                and r["author"]["login"]
-                    != pr_data.get("author", {}).get("login")
-            ],
-            "comments": [
-                {
-                    "user": c["author"]["login"],
-                    "body": c["body"],
-                }
-                for c in pr_data.get("comments", [])
-                if c["author"]["login"]
-                    != pr_data.get("author", {}).get("login")
-                and not c["author"]["login"].endswith("[bot]")
-            ],
-            "inline_comments": inline,
-        }
-    json.dump(results, sys.stdout, indent=2)
+        pr = fetch_teammate_comments(repo, num)
+        if comment_count(pr):
+            results[key] = pr
+    log(f"{len(results)} of {len(prs)} PRs have teammate comments")
+
+    if out_dir is None:
+        json.dump(results, sys.stdout, indent=2)
+        return
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    summary = []
+    for n, batch in enumerate(pack_batches(results), 1):
+        path = out / f"comments-batch{n}.json"
+        path.write_text(json.dumps(batch, indent=1))
+        summary.append({
+            "path": str(path),
+            "prs": len(batch),
+            "comments": sum(comment_count(pr) for pr in batch.values()),
+        })
+    json.dump(summary, sys.stdout, indent=2)
 
 
 if __name__ == "__main__":
@@ -269,21 +334,24 @@ if __name__ == "__main__":
 
     cmd = sys.argv[1]
     if cmd == "fetch":
-        batch_size = 50
         since = (date.today() - timedelta(days=DEFAULT_SINCE_DAYS)).isoformat()
         args = sys.argv[2:]
         for i, arg in enumerate(args):
-            if arg == "--batch-size" and i + 1 < len(args):
-                batch_size = int(args[i + 1])
-            elif arg == "--since" and i + 1 < len(args):
+            if arg == "--since" and i + 1 < len(args):
                 since = args[i + 1]
-        cmd_fetch(batch_size, since)
+        cmd_fetch(since)
     elif cmd == "fetch-comments":
-        prs = [parse_pr_key(x) for x in sys.argv[2:]]
+        args = sys.argv[2:]
+        out_dir = None
+        if "--out-dir" in args:
+            i = args.index("--out-dir")
+            out_dir = args[i + 1]
+            del args[i:i + 2]
+        prs = [parse_pr_key(x) for x in args]
         if not prs:
             log("No PRs provided")
             sys.exit(1)
-        cmd_fetch_comments(prs)
+        cmd_fetch_comments(prs, out_dir)
     else:
         print(f"Unknown command: {cmd}")
         sys.exit(1)

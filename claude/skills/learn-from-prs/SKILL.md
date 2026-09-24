@@ -1,7 +1,7 @@
 ---
 name: learn-from-prs
 description: Fetch and analyze PR review patterns from teammates to learn their review preferences.
-argument-hint: "[batch-size]"
+argument-hint: "[since YYYY-MM-DD]"
 ---
 
 # Learn From PRs
@@ -29,28 +29,36 @@ on the smarter main thread. Don't invert this.
 
 1. **Fetch and filter** unprocessed high-signal PRs:
    ```bash
-   python3 ~/.claude/scripts/learn-from-prs.py fetch --batch-size N 2>&1
+   python3 ~/.claude/scripts/learn-from-prs.py fetch 2>&1
    ```
-   Outputs JSON array of `{key, repo, number, signal, title, author}` to
-   stdout, where `key` is `"<owner>/<repo>#<number>"`.
-   N defaults to 50; use the skill argument if provided. The search covers
-   the last 180 days by default; pass `--since YYYY-MM-DD` to widen it.
+   Outputs a JSON array of every unprocessed high-signal PR,
+   `{key, repo, number, signal, title, author}`, to stdout, where `key` is
+   `"<owner>/<repo>#<number>"`. The search covers the last 180 days by
+   default; pass `--since YYYY-MM-DD` (the skill argument, if provided) to
+   widen it. Scoring costs about three `gh` calls per PR, so a first run over
+   a wide window takes a long time: run it in the background.
    **Always capture stderr.** If the output contains `gh error` or auth
    failure messages, report the error to the user and stop — do not
    treat an auth failure as "no PRs found."
 
-2. **Fetch review data** for the batch:
+2. **Fetch review data** for all of them in one call, into a fresh
+   scratchpad directory:
    ```bash
-   python3 ~/.claude/scripts/learn-from-prs.py fetch-comments KEY1 KEY2 ...
+   python3 ~/.claude/scripts/learn-from-prs.py fetch-comments --out-dir DIR KEY1 KEY2 ...
    ```
    Pass the `key` field from step 1 verbatim (e.g. `owner/repo#585`) — a
-   bare number is read as a PR in the first configured repo.
-   Sub-batch of ~12-15 PRs per fetch is fine.
+   bare number is read as a PR in the first configured repo. The script
+   keeps only teammates' comments, trims each inline comment's diff context,
+   and writes `DIR/comments-batchN.json` files sized for one map agent each;
+   it prints `[{path, prs, comments}]`. It costs two `gh` calls per PR, so
+   run it in the background for large sets.
 
 3. **MAP** — spawn `analyze-pr-reviews` agents (Haiku, in parallel):
-   - One agent per sub-batch.
-   - Pass it the path to its `comments-batchN.json` and the teammate
-     filter list (see Teammates section below).
+   - One agent per batch file from step 2.
+   - Pass it the path to its batch file and the teammate filter list (see
+     Teammates section below).
+   - Have it write its output to `DIR/map-outN.md` and reply with only the
+     bullet count, so the map results survive a crash in the reduce step.
    - The agent only filters noise + classifies + extracts quotes. It
      does NOT name patterns or compare against existing learnings.
    - Output is a tight per-reviewer comment list with categories +
@@ -79,8 +87,8 @@ on the smarter main thread. Don't invert this.
      results and the reduce step completed). If the fetch returned an
      empty array — whether due to auth failures, network errors, or
      genuinely no new PRs — do NOT update `last_run`.
-   - Append newly processed PR keys (`"<owner>/<repo>#<number>"`) to
-     `processed`.
+   - Append the key of every PR from step 1 (`"<owner>/<repo>#<number>"`)
+     to `processed`, including those with no teammate comments.
    - Set `last_run` to current ISO timestamp.
 
 6. **Consolidate your own learnings** (piggybacking on this skill's
@@ -122,8 +130,7 @@ If the team composition changes, edit `config.json` — nowhere else.
 - Use the helper script for all fetching (pre-approved, no permission prompts)
 - Repos come from `repos` in `config.json`. PRs are addressed as
   `<repo>#<number>` because numbers collide across repos.
-- Process in sub-batches to stay within context limits
-- Save progress after each sub-batch (crash-safe)
+- The script sizes batches to fit a map agent's context; don't regroup them
 - If no new PRs to process, report that and exit early
 - Never post comments on GitHub from this skill — it only reads and distills.
 - **Filter to teammates only** — when spawning analyze-pr-reviews agents,

@@ -49,7 +49,9 @@ You will receive:
      (description, not interpretation — don't editorialize)
    - One short verbatim quote (1-2 sentences max, ≤200 chars; truncate
      mid-sentence with `...` if needed)
-   - PR number
+   - The PR's full key exactly as it appears in the JSON
+     (`<owner>/<repo>#<number>`); PR numbers collide across repos, so
+     never cite a bare number
 
    Do NOT add categories or tags. Do NOT label patterns. Do NOT
    prioritize. Do NOT decide whether the comment is "interesting."
@@ -63,9 +65,9 @@ counting.
 ```
 ## <reviewer_login>
 - one-sentence paraphrase of the ask.
-  > "verbatim quote" (PR #NNNN)
+  > "verbatim quote" (<owner>/<repo>#<number>)
 - one-sentence paraphrase.
-  > "verbatim quote" (PR #NNNN)
+  > "verbatim quote" (<owner>/<repo>#<number>)
 
 ## <next_reviewer_login>
 - ...
