@@ -4,13 +4,15 @@ Fetch and filter high-signal PRs for review pattern analysis.
 
 Usage:
   learn-from-prs.py fetch [--since YYYY-MM-DD]
-    Fetch merged PRs across the configured repos, filter to high-signal,
-    output all unprocessed ones. Each entry carries the repo it came from.
-    --since bounds the search (default: the last 180 days).
+    Fetch merged PRs across the configured repos that the user or a teammate
+    authored, or that the user reviewed; filter to high-signal and output all
+    unprocessed ones. Each entry carries the repo it came from. --since bounds
+    the search (default: the last 180 days).
 
   learn-from-prs.py fetch-comments [--out-dir DIR] <repo#pr> [<repo#pr> ...]
-    Fetch the teammates' review bodies, discussion comments and inline
-    comments on specific PRs, excluding the PR author's own. PRs with none
+    Fetch the review bodies, discussion comments and inline comments the
+    user and teammates left on specific PRs, excluding the PR author's own.
+    PRs with none
     are left out. With --out-dir, writes them to DIR/comments-batchN.json in
     batches sized for one map-stage agent each and prints the batch list;
     otherwise prints them all. A bare number is read as a PR in the first
@@ -30,9 +32,12 @@ from datetime import date, timedelta
 from local_review_config import TEAM_TRACKER, load as load_config
 
 _config = load_config()
-# The user plus the teammates whose reviews we learn from.
-AUTHORS = [_config["login"], *_config["teammates"]]
-TEAMMATES = set(_config["teammates"])
+LOGIN = _config["login"]
+# Whose PRs are searched: the user plus the teammates.
+AUTHORS = [LOGIN, *_config["teammates"]]
+# Whose review comments are learned from: the teammates for their patterns,
+# the user for their own standards.
+REVIEWERS = {LOGIN, *_config["teammates"]}
 # PRs are identified as "<repo>#<number>" throughout, because PR numbers
 # collide across repos.
 REPOS = _config["repos"]
@@ -91,11 +96,12 @@ def read_tracker():
     return tracker
 
 
-def fetch_prs_for_author(repo, author, since_date):
-    """Fetch merged PRs authored by a given user since the given date."""
+def fetch_prs(repo, qualifier, since_date):
+    """Fetch merged PRs matching a search qualifier (e.g. `author:<login>`)
+    since the given date."""
     out = run_gh([
         "pr", "list", "--repo", repo, "--state", "merged",
-        "--search", f"merged:>={since_date} author:{author}",
+        "--search", f"merged:>={since_date} {qualifier}",
         "--json", "number,title,author,mergedAt,reviewDecision",
         "--limit", "999",
     ], timeout=60)
@@ -187,16 +193,19 @@ def cmd_fetch(since):
             return last_run[:10]
         return since
 
-    log(f"Fetching PRs for {len(AUTHORS)} authors across {len(REPOS)} repos...")
+    # The user's own review comments count wherever they were left, so the PRs
+    # they reviewed are searched too, whoever authored them.
+    qualifiers = [f"author:{a}" for a in AUTHORS] + [f"reviewed-by:{LOGIN}"]
+    log(f"Fetching PRs for {len(qualifiers)} searches across {len(REPOS)} repos...")
     all_prs = {}
     for repo in REPOS:
         since_date = since_for(repo)
         log(f"{repo} (merged since {since_date}):")
-        for author in AUTHORS:
-            prs = fetch_prs_for_author(repo, author, since_date)
+        for qualifier in qualifiers:
+            prs = fetch_prs(repo, qualifier, since_date)
             for pr in prs:
                 all_prs[pr_key(repo, pr["number"])] = {**pr, "repo": repo}
-            log(f"  {author}: {len(prs)} PRs")
+            log(f"  {qualifier}: {len(prs)} PRs")
 
     log(f"Total unique PRs: {len(all_prs)}")
 
@@ -239,14 +248,15 @@ def cmd_fetch(since):
     json.dump(high_signal, sys.stdout, indent=2)
 
 
-def fetch_teammate_comments(repo, pr_number):
+def fetch_review_comments(repo, pr_number):
     """The PR's title and author plus the review bodies, discussion comments
-    and inline comments teammates left on it, excluding the author's own."""
+    and inline comments the user and teammates left on it, excluding the
+    author's own."""
     pr_data = fetch_pr_reviews_and_comments(repo, pr_number)
     author = pr_data.get("author", {}).get("login", "?")
 
-    def by_teammate(user, body):
-        return user in TEAMMATES and user != author and body.strip()
+    def by_reviewer(user, body):
+        return user in REVIEWERS and user != author and body.strip()
 
     return {
         "repo": repo,
@@ -260,7 +270,7 @@ def fetch_teammate_comments(repo, pr_number):
                 "body": r.get("body", ""),
             }
             for r in pr_data.get("reviews", [])
-            if by_teammate(r["author"]["login"], r.get("body", ""))
+            if by_reviewer(r["author"]["login"], r.get("body", ""))
         ],
         "comments": [
             {
@@ -268,11 +278,11 @@ def fetch_teammate_comments(repo, pr_number):
                 "body": c["body"],
             }
             for c in pr_data.get("comments", [])
-            if by_teammate(c["author"]["login"], c["body"])
+            if by_reviewer(c["author"]["login"], c["body"])
         ],
         "inline_comments": [
             c for c in fetch_inline_comments(repo, pr_number)
-            if by_teammate(c["user"], c["body"])
+            if by_reviewer(c["user"], c["body"])
         ],
     }
 
@@ -304,10 +314,10 @@ def cmd_fetch_comments(prs, out_dir):
     for i, (repo, num) in enumerate(prs):
         key = pr_key(repo, num)
         log(f"[{i+1}/{len(prs)}] Fetching {key}...")
-        pr = fetch_teammate_comments(repo, num)
+        pr = fetch_review_comments(repo, num)
         if comment_count(pr):
             results[key] = pr
-    log(f"{len(results)} of {len(prs)} PRs have teammate comments")
+    log(f"{len(results)} of {len(prs)} PRs have review comments from the roster")
 
     if out_dir is None:
         json.dump(results, sys.stdout, indent=2)

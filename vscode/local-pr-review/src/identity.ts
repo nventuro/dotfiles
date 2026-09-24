@@ -3,8 +3,8 @@ import { ReviewThread } from './types';
 /**
  * Whether `author` is you. Two identities count as "you":
  *   - your OS username — how local comments (yours / via the picker) are authored;
- *   - your GitHub login — how comments you wrote on the PR are authored, captured
- *     as `CommentsFile.viewerLogin` when /load-pr-comments imported them.
+ *   - your GitHub login — how comments you wrote on the PR are authored, recorded
+ *     as `CommentsFile.viewerLogin` when a PR's comments are imported.
  * Without this, a note you left on your own PR loads under your GitHub login (≠ OS
  * username) and gets mis-filed as "someone else's, awaiting your OK" in triage.
  */

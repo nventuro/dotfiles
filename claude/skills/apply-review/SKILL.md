@@ -36,9 +36,9 @@ Each **thread**:
 |---|---|
 | `id` | thread id — match on this to mark resolved or target a single one |
 | `filePath` | path relative to the repo root |
-| `startLine` / `endLine` | the commented line range |
+| `startLine` / `endLine` | the commented line range, 0-based as stored (`list-actionable` reports them 1-based) |
 | `state` | `unresolved` or `resolved` — skip resolved |
-| `disposition` | only on threads you didn't author (`team`/`codex`/`learnings`/a GitHub login): `accepted` = you clicked **"Queue for apply"** in VS Code (also posts a "✅ Queue for apply" `local` comment). Absent = not triaged → skip |
+| `disposition` | only on threads you didn't author (`team`/`claude`/`codex`/`learnings`/a GitHub login): `accepted` = you clicked **"Queue for apply"** in VS Code (also posts a "✅ Queue for apply" `local` comment). Absent = not triaged → skip |
 | `comments` | array of `{ id, body, author, timestamp, channel }`; `comments[0].body` is the review note, later entries are replies |
 | `channel` (per comment) | `github` = imported from the PR conversation — **never author here** (it'd imply speaking on the PR); `local` = private to you + Claude, never synced. Your replies are **always** `channel: "local"`. Absent = treat as `local`. |
 
@@ -89,8 +89,8 @@ Each **thread**:
 2. **Decide and act — grouped by file.** The threads come sorted by file, so handle
    all of one file's threads in a batch: read `<repo-root>/<filePath>` **once**, then
    make all its edits. The `anchor` field is the exact code each comment was about —
-   use it + the `note` to locate the spot (`startLine` may be 0-/1-based and may have
-   drifted; don't trust it alone). Per thread:
+   use it + the `note` to locate the spot (`startLine` is 1-based but may have
+   drifted since the comment was written; don't trust it alone). Per thread:
    - **`reason: "apply"` + agree** → make the change the note asks for (fix, rename,
      doc addition, a question answered in code).
    - **`reason: "reply"`** → answer the user's note; change code **only if it
@@ -147,15 +147,18 @@ Each **thread**:
      preference, a doc or test convention, a "don't do X". **Drop one-offs** (a typo
      fix, a this-specific-value correction, anything that won't recur). **When in
      doubt, drop** — the file predicts future feedback, it is not an archive. Skip threads
-     you pushed back on, and **never** distill `team`/`codex`/GitHub comments — the
-     file must stay *your* (the user's) standards.
+     you pushed back on, and **never** distill `team`/`claude`/`codex`/`learnings`/GitHub comments — the
+     file must stay *your* (the user's) standards. Also skip a rule your `CLAUDE.md` already states:
+     it is loaded in every session already.
    - Read the file, then per kept preference (mirroring `/learn-from-prs`'s reduce
      rules): reinforces an existing bullet → bump its `(seen Nx)` count (optionally a
      fresh quote); genuinely new recurring → add `- **Rule** (seen 1x) — …` under the
      right `## <theme>`; a notable single instance (soundness/security/novel
      principle) → `(seen 1x, notable)`; noise → drop. **Write directly — don't ask
      for approval.** Keep each bold headline self-contained (it's what the hook
-     injects) and the file tight. If nothing this batch is generalizable, write
+     injects) and the file tight. Then finish with one line per rule added or
+     bumped, quoting its headline and new `(seen Nx)` count, since the file is
+     injected into every session. If nothing this batch is generalizable, write
      nothing and say so.
 
 ## Notes

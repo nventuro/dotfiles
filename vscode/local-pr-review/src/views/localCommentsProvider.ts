@@ -106,7 +106,7 @@ const ICONS: Record<Category, vscode.ThemeIcon> = {
     needsOk: new vscode.ThemeIcon('person', new vscode.ThemeColor('localPrReview.unresolvedCommentForeground')),
     // You queued it — green rocket, echoing the "Queue for apply" action.
     accepted: new vscode.ThemeIcon('rocket', new vscode.ThemeColor('charts.green')),
-    // /apply-review made the change but left it for you to verify + resolve.
+    // The change was made; left for you to verify + resolve.
     applied: new vscode.ThemeIcon('pass', new vscode.ThemeColor('charts.blue')),
     // Your own note.
     mine: new vscode.ThemeIcon('comment'),

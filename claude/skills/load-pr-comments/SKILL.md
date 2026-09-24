@@ -96,7 +96,8 @@ for private repos.
    with fresh reviewer replies.)
 
    For each selected thread, read the code it points at **on the current
-   branch** (`filePath` + `startLine`–`endLine`; the `anchor` snippet is the
+   branch** (`filePath` + `startLine`–`endLine`, which the file stores 0-based, so
+   add 1 for file line numbers; the `anchor` snippet is the
    original hunk) and form a recommendation: 2–4 sentences, leading with a
    bolded verdict:
 

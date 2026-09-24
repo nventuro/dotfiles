@@ -29,12 +29,12 @@ Local Review extension, you triage them there, and `/apply-review` applies what
 you accepted. The two sides share one JSON file per review under the repo's
 `.vscode/local-reviews/`.
 
-Skills: `/local-review` runs every pass and posts the threads. `/review-as-team`
-checks the diff against your reviewers' learned patterns, `/review-as-codex`
-gets an independent Codex review. `/apply-review` applies queued threads and
+Skills: `/local-review` runs every pass and posts the threads: your own rules,
+your reviewers' learned patterns (`/review-as-team`), and general reviews by a
+fresh Claude agent and by Codex (`/review-as-codex`), both given the same prompt. `/apply-review` applies queued threads and
 answers your replies. `/load-pr-comments` pulls a real PR's review threads in.
 `/learn` records one of your own rules; `/learn-from-prs` learns your
-reviewers' patterns from merged PRs.
+reviewers' patterns, and your own rules from the reviews you left, from merged PRs.
 
 The kit keeps its personal state outside this repo, in `~/.claude/local-review/`:
 `config.json` (your GitHub login, teammates, and the repos to learn from) plus

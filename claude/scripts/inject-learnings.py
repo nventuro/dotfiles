@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """SessionStart hook: inject the user's coding preferences.
 
-Reads ~/.claude/local-review/my-learnings.md (the preferences /apply-review and
-/learn distill from the user's own review comments) and emits a compact,
+Reads ~/.claude/local-review/my-learnings.md (the user's own coding
+preferences) and emits a compact,
 headline-only digest as SessionStart additionalContext — but ONLY when the
 session is inside a checkout of one of the repos in config.json (any git repo
 when none are configured), so unrelated sessions pay nothing.
@@ -10,9 +10,9 @@ when none are configured), so unrelated sessions pay nothing.
 Design constraints:
   - Fail-open: any error -> emit nothing, exit 0. Never delay or break session
     start, and never surface a stack trace into the user's session.
-  - Headlines only, sorted by (seen Nx) count descending and capped
-    (MAX_BULLETS / MAX_CHARS) generously enough that the whole file fits
-    today; if it outgrows the caps, the highest-frequency rules survive.
+  - Headlines only, sorted by (seen Nx) count descending and capped at
+    MAX_BULLETS / MAX_CHARS so the injected context stays small; when the file
+    holds more, the highest-frequency rules survive.
 """
 
 import json
@@ -22,7 +22,7 @@ import sys
 
 from local_review_config import MY_LEARNINGS, load as load_config
 
-MAX_BULLETS = 100
+MAX_BULLETS = 30
 MAX_CHARS = 12000  # ~3k tokens; hard ceiling on injected size
 
 BULLET_RE = re.compile(r"\s*-\s+\*\*(.+?)\*\*\s*(.*)")
@@ -93,8 +93,8 @@ def main():
     if not digest:
         return 0
     context = (
-        "The user's coding preferences, learned from their own local code "
-        "reviews (/apply-review). Treat these as standing review feedback and "
+        "The user's coding preferences, learned from their own code reviews. "
+        "Treat these as standing review feedback and "
         "follow them while writing code:\n" + digest
     )
     print(json.dumps({

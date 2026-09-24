@@ -122,15 +122,18 @@ read-only review of a trusted local repo:
 codex review -c 'sandbox_mode="danger-full-access"' "$PROMPT"
 ```
 
-Build `$PROMPT` from the template below. The first paragraph states the scope:
+Build `$PROMPT` from the template below, with `<repo_root>` set to `$repo_root`.
+The first paragraph states the scope:
 use the uncommitted form shown, or for branch/PR scope "Review the changes on
-this branch against `<base>`; enumerate them with `git diff <base>...HEAD`."
+this branch against `<base>` in the repository at <repo_root>; enumerate them
+there with `git diff <base>...HEAD`."
 Omit the Goal or Already-run line when there is nothing concrete for it, and
 omit the whole assumptions section when step 3 left it out.
 
 ```text
-Review the current UNCOMMITTED changes in this repository (staged, unstaged
-and untracked); enumerate them with `git status --porcelain` and `git diff HEAD`.
+Review the current UNCOMMITTED changes in the repository at <repo_root>
+(staged, unstaged and untracked); enumerate them there with
+`git status --porcelain` and `git diff HEAD`.
 
 Goal of the change: ...
 Already run: ...

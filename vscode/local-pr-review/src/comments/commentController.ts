@@ -7,7 +7,7 @@ import { isOwnAuthor } from '../identity';
 import * as os from 'os';
 
 // Approving / ignoring a not-your-own suggestion posts the intent as a real
-// comment (not just a hidden flag), so /apply-review reads your decision as text
+// comment (not just a hidden flag), so anyone reading the thread sees your decision as text
 // and you can add nuance in the same thread. Posted as a 'local' comment authored
 // by you; the QUEUE_BODY is also matched on undo to remove the orphaned approval.
 export const QUEUE_BODY = '✅ Queue for apply — please apply this suggestion.';
@@ -211,8 +211,8 @@ export class ReviewCommentController {
 
     /**
      * Refresh the comments/state of every existing thread instance from storage,
-     * in place (no dispose/recreate). Used when the store changes externally
-     * (e.g. /apply-review). Disposes instances whose thread was deleted, and
+     * in place (no dispose/recreate). Used when the store changes externally.
+     * Disposes instances whose thread was deleted, and
      * creates file:// instances for threads that have none yet.
      */
     /** Is this author you — OS username or your GitHub login? */
@@ -384,7 +384,7 @@ export class ReviewCommentController {
     /**
      * A quiet, non-persisted "📜 Local Review · when commented" bubble holding the
      * code the comment was written against. Not editable/deletable (no `canEdit`
-     * contextValue, no `__id`), so it stays clear of the edit/delete/learn paths.
+     * contextValue, no `__id`), so it stays clear of the edit/delete paths.
      */
     private makeSnapshotComment(stored: ReviewThread): vscode.Comment {
         const code = stored.anchor?.code ?? '';
@@ -635,8 +635,8 @@ export class ReviewCommentController {
     }
 
     private toVscodeComment(comment: ReviewComment, isGithubThread = false): vscode.Comment {
-        // 'github' = part of the synced PR conversation; 'local' = a private note
-        // (you/Claude/review-as-*), never synced — badged "local" so it's clear it
+        // 'github' = part of the imported PR conversation; 'local' = a private note,
+        // never synced — badged "local" so it's clear it
         // won't reach GitHub. Legacy comments (no channel) are inferred: on a GitHub
         // thread, the reviewer's comments are github, your/Claude notes are local.
         const channel: 'github' | 'local' = comment.channel
@@ -651,8 +651,8 @@ export class ReviewCommentController {
             body: new vscode.MarkdownString(comment.body),
             author: {
                 name: displayName,
-                // Local comments get a lock-badged avatar so the "private to you +
-                // Claude" channel reads from the picture too, not just the label.
+                // Local comments get a badged avatar so the private channel reads
+                // from the picture too, not just the label.
                 iconPath: avatarFor(this.avatarDir, displayName, comment.avatarUrl, channel === 'local'),
             },
             mode: vscode.CommentMode.Preview,
@@ -710,7 +710,7 @@ export class ReviewCommentController {
 
     /** GitHub-style role badge shown next to the author name. */
     private authorLabel(author: string): string | undefined {
-        if (author === 'team' || author === 'codex' || author === 'learnings') {
+        if (author === 'team' || author === 'codex' || author === 'learnings' || author === 'claude') {
             return 'AI';
         }
         // Your own name renders as "you" (see toVscodeComment), so no 'you' badge.
@@ -733,7 +733,7 @@ export class ReviewCommentController {
         this.restyleAll(data.threadId);
     }
 
-    /** "Queue for apply" — greenlight a not-your-own thread so /apply-review acts on it. */
+    /** "Queue for apply" — approve a not-your-own thread to be applied. */
     acceptThread(thread: vscode.CommentThread): void {
         const data = (thread as any).__threadData as ThreadData | undefined;
         if (data) { this.queueThreadById(data.threadId); }
@@ -764,7 +764,7 @@ export class ReviewCommentController {
     }
 
     /**
-     * Queue a thread for /apply-review: set the `accepted` disposition (the machine
+     * Queue a thread for applying: set the `accepted` disposition (the machine
      * cache the navigator/menus read) AND post a 'local' "queue for apply" comment
      * so the intent is legible in the thread. Both the inline button and the triage
      * picker route here, so they behave identically.

@@ -449,8 +449,8 @@ export async function activate(context: vscode.ExtensionContext) {
     // click into a pane, so the active-editor event alone leaves the mark action
     // disabled right after a diff opens. Re-evaluating on selection fixes that.
     vscode.window.onDidChangeTextEditorSelection(() => updateMarkContext()),
-    // Re-scan when you return to VS Code or reopen the view. External edits (Claude
-    // in the terminal, a /sync, shell git ops) don't fire onDidSaveTextDocument, so
+    // Re-scan when you return to VS Code or reopen the view. External edits (tools in a
+    // terminal, git commands) don't fire onDidSaveTextDocument, so
     // without these the changeset + "to review" badge stay stale until the git
     // extension happens to refresh (usually on focus) — these make it deterministic.
     vscode.window.onDidChangeWindowState((e) => {
@@ -466,8 +466,8 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   updateMarkContext();
 
-  // React to EXTERNAL changes to the comments store — e.g. /apply-review
-  // replying in the terminal. Without this, the in-memory thread instances and
+  // React to EXTERNAL changes to the comments store — e.g. a tool replying
+  // from a terminal. Without this, the in-memory thread instances and
   // the file counters go stale, and the two diff-side copies of a thread
   // diverge (one shows the reply, the other doesn't). Our own writes are
   // skipped via storageService.lastWriteAt so typing a comment doesn't flicker.
@@ -480,7 +480,7 @@ export async function activate(context: vscode.ExtensionContext) {
       if (Date.now() - storageService.lastWriteAt < 1500) {
         return;
       }
-      // An external tool (e.g. /load-pr-comments) may have created or switched
+      // An external tool may have created or switched
       // the active review in registry.json, which we hold in memory; re-read it
       // so loadComments() targets the right review.
       localPrManager.reloadRegistry();
@@ -502,14 +502,13 @@ export async function activate(context: vscode.ExtensionContext) {
         fileDecorationProvider.refresh();
         return;
       }
-      // Pull down any GitHub avatars an external write (e.g. /load-pr-comments)
-      // just referenced, so they're cached before the threads re-render.
+      // Pull down any GitHub avatars an external write just referenced, so they're cached before the threads re-render.
       await commentController.preloadAvatars();
       // Update every open thread instance in place (keeps both diff sides,
       // incl. a staged diff's index side, without dispose/recreate).
       commentController.refreshThreadComments();
       syncReviewableFiles();
-      // An external write (e.g. /apply-review) may have changed code or set
+      // An external write may have changed code or set
       // `applied` — re-check drift so threads flip to Outdated + show the original.
       await refreshOutdated();
       fileDecorationProvider.refresh();
@@ -1026,7 +1025,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   // "Ignore" a proposal: leave a "skipping this" note and resolve it (collapses +
-  // excluded from /apply-review). A distinct verb+icon from your own "Resolve".
+  // excluded from applying). A distinct verb+icon from your own "Resolve".
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "localPrReview.dismissThread",

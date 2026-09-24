@@ -62,16 +62,16 @@ export interface ReviewThread {
     // doesn't get a twin on the opposite diff side. Absent (legacy) ⇒ working tree.
     onWorkingTree?: boolean;
     // The user's triage of a thread they didn't author (team/codex/GitHub). Only
-    // such "proposable" threads carry it. 'accepted' = "queue for apply", which is
-    // what /apply-review acts on. 'dismissed' = "skip always" — muted: it leaves the
+    // such "proposable" threads carry it. 'accepted' = "queue for apply": approved
+    // to be applied. 'dismissed' = "skip always" — muted: it leaves the
     // triage queue + needs-OK count but stays UNRESOLVED and untouched on GitHub (for
     // a note you keep open for reviewers). Your own comments need no disposition.
     disposition?: 'accepted' | 'dismissed';
-    // Set by /apply-review when it made the change for a not-yours thread but left
-    // it UNRESOLVED (so you verify + resolve yourself). Prevents re-applying.
+    // Set once the change a not-yours thread asks for has been made; the thread
+    // stays UNRESOLVED so you verify + resolve it yourself. Prevents re-applying.
     applied?: boolean;
-    // Present on threads imported from a GitHub PR — the identity used to upsert on
-    // re-sync and to resolve the thread back on GitHub (via the host bridge).
+    // Present on threads imported from a GitHub PR — the identity used to update the
+    // thread in place when the PR is imported again.
     github?: GithubRef;
     // The code this comment was written against. Captured only when we KNOW it: at
     // local create-time (from the editor), or from a GitHub comment's diff_hunk. We
@@ -102,9 +102,9 @@ export interface ReviewComment {
     // cached locally so the thread shows their real picture instead of an initial.
     avatarUrl?: string;
     // Which conversation channel this comment belongs to:
-    //   'github' — mirrors the PR (loaded, read-only here; resolution syncs).
-    //   'local'  — never synced; Claude/you/review-as-* talk here, even layered on
-    //              a GitHub thread (a private side-conversation for Claude).
+    //   'github' — imported from the PR conversation; read-only here.
+    //   'local'  — never leaves this machine: your notes and replies from review
+    //              tools, even on a GitHub thread.
     // Absent (legacy) is inferred at render from the thread + author.
     channel?: 'github' | 'local';
 }
@@ -116,7 +116,7 @@ export interface CommentsFile {
     sourceCommit: string;
     targetCommit: string;
     threads: ReviewThread[];
-    // Your GitHub login, captured by /load-pr-comments. Comments authored under it
+    // Your GitHub login, recorded when a PR's comments are imported. Comments authored under it
     // are treated as yours (so a note you left on your own PR isn't mis-filed as a
     // reviewer's comment awaiting your OK). Absent until a PR has been loaded.
     viewerLogin?: string;

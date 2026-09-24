@@ -4,9 +4,10 @@
 
   {
     "login": "<your GitHub login>",
-    "teammates": ["<login>", ...],    whose review patterns /learn-from-prs learns
-    "repos": ["<owner>/<name>", ...]  where it learns from, and where the
-                                      SessionStart hook injects your learnings
+    "teammates": ["<login>", ...],    the people who review your PRs, whose
+                                      review patterns are learned
+    "repos": ["<owner>/<name>", ...]  where those patterns are learned from, and
+                                      where your learnings are injected into sessions
   }
 
 The same directory holds the learnings the reviews read (paths below).

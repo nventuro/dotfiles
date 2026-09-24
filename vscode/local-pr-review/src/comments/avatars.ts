@@ -19,8 +19,8 @@ function hash(s: string): number {
 function svgFor(name: string, local: boolean): string {
     const initial = (name.trim()[0] || '?').toUpperCase();
     const color = PALETTE[hash(name) % PALETTE.length];
-    // Bottom-right accent dot marks a 'local' comment (private to you + Claude, not
-    // on GitHub). A plain dot reads at any size; the "local" text label carries the
+    // Bottom-right accent dot marks a 'local' comment (private to this machine,
+    // not on GitHub). A plain dot reads at any size; the "local" text label carries the
     // meaning. White ring so it pops off any avatar colour.
     const badge = local
         ? '<circle cx="24.5" cy="24.5" r="4.9" fill="#15a3a3" stroke="#ffffff" stroke-width="1.35"/>'
@@ -106,7 +106,7 @@ function download(url: string, dest: string, redirects = 3): Promise<void> {
 /**
  * Best-effort: download and cache any not-yet-cached GitHub avatars referenced
  * by these comments. Awaitable so callers can fetch before (re)rendering, but
- * every failure (offline, firewall-blocked CDN in a container) is swallowed —
+ * every failure (offline, a blocked network) is swallowed —
  * the author just keeps the initial badge. Returns true if anything new landed.
  */
 export async function preloadAvatars(

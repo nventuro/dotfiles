@@ -68,7 +68,7 @@ export class LocalPrManager {
     /**
      * Re-read registry.json from disk. The registry is held in memory and only
      * refreshed on our own writes, so an external tool that creates or switches
-     * a review (e.g. /load-pr-comments bootstrapping one) is invisible until this
+     * a review is invisible until this
      * is called.
      */
     reloadRegistry(): void {
@@ -128,8 +128,7 @@ export class LocalPrManager {
      * it to decide whether to load threads).
      */
     async ensureReview(currentBranch: string, defaultMode: ReviewMode = 'branch'): Promise<{ review: LocalPr; created: boolean }> {
-        // Re-read from disk first so a review created externally (e.g. by
-        // /load-pr-comments bootstrapping one) is visible. Otherwise our stale
+        // Re-read from disk first so a review created externally is visible. Otherwise our stale
         // in-memory registry wouldn't match it, we'd append a duplicate, and the
         // next saveRegistry would overwrite the on-disk record — dropping the
         // external review and orphaning its comments.

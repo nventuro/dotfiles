@@ -26,10 +26,10 @@ The reviewer agent reads them itself.
 
 Check the tracker's `last_run` and whether the learnings file exists:
 
-- **Fresh (≤24h)**: proceed silently.
-- **Stale (>24h)**: ask with `AskUserQuestion`
+- **Fresh (≤30 days)**: proceed silently.
+- **Stale (>30 days)**: ask with `AskUserQuestion`
   (header="Learnings", multiSelect=false):
-  - question: `"Learnings are N hours old. Update before reviewing?"`
+  - question: `"Learnings are N days old. Update before reviewing?"`
   - options:
     - `Update` — run `/learn-from-prs` synchronously, then continue.
     - `Use current` — proceed with the existing file.
@@ -114,7 +114,7 @@ the reviewer as a phantom `+` finding.
 
 ### 4. Run the reviewer agent
 
-Single Agent call, `subagent_type: "general-purpose"`, with `model` from the
+Single Agent call, `subagent_type: "code-reviewer"`, with `model` from the
 step-2 selection (Fable / Opus / Sonnet; Default → omit). Its prompt is the
 template below, with `<diff>`, `<repo_root>` (`git rev-parse --show-toplevel`)
 and the output spec filled in:

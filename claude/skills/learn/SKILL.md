@@ -10,8 +10,8 @@ allowed-tools: [Read, Edit, Write]
 Record a preference the user states explicitly into
 `~/.claude/local-review/my-learnings.md`, the store whose bold headlines a
 SessionStart hook injects into sessions in the configured repos. This is the
-manual entry point; /apply-review distills review comments into the same file
-automatically. Use the same file and format for both.
+manual entry point; /apply-review and /learn-from-prs add to the same file
+automatically. Use the same file and format for all three.
 
 Note: if the request is "whenever EVENT happens, do X automatically", that
 needs a hook in settings.json, not a learning — say so and offer to set up the
@@ -29,5 +29,6 @@ hook instead.
    a new `(seen 1x)` bullet under the right `## theme` header, creating the
    header only if no existing one fits.
 4. If the input is a one-off (specific to the current change, won't recur),
-   record nothing and say why.
+   or a rule your `CLAUDE.md` already states (it is loaded in every session
+   already), record nothing and say why.
 5. Confirm by quoting the exact headline as recorded or updated.

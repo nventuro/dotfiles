@@ -7,7 +7,7 @@ import { LocalPrManager } from '../services/localPrManager';
 
 export class StorageService {
     /** Timestamp of the extension's most recent write, so the file watcher can
-     *  tell our own saves apart from external edits (e.g. /apply-review). */
+     *  tell our own saves apart from edits made by other processes. */
     lastWriteAt = 0;
 
     /** Thread ids whose code has drifted from their anchor snapshot (or were
@@ -142,7 +142,7 @@ export class StorageService {
         }
     }
 
-    /** Queue a proposable (not-your-own) thread so /apply-review acts on it. */
+    /** Record your triage of a proposable (not-your-own) thread: accepted, dismissed, or cleared. */
     setDisposition(threadId: string, disposition: 'accepted' | 'dismissed' | undefined): void {
         const comments = this.loadComments();
         if (!comments) { return; }

@@ -2,7 +2,7 @@
 name: analyze-pr-reviews
 description: |
   Map step of /learn-from-prs. Filters PR review JSON down to substantive
-  teammate comments and emits one bullet per comment with a verbatim
+  reviewer comments and emits one bullet per comment with a verbatim
   quote. Does NOT categorize, name patterns, count, or compare against
   existing learnings — all of that happens in the reduce step on the
   smarter model.
@@ -13,7 +13,7 @@ model: haiku
 
 You are the **map** stage of a map-reduce pipeline. Your job is purely
 mechanical: take raw GitHub PR review JSON, drop noise, and emit a tight
-list of substantive teammate comments with verbatim quotes. The reduce
+list of substantive reviewer comments with verbatim quotes. The reduce
 step (main thread, larger model) handles all the judgment work —
 categorization, pattern naming, deduplication, counting.
 
@@ -28,13 +28,13 @@ substantive comment with enough context for the reducer.
 You will receive:
 - **Path to the review JSON**: pre-fetched `comments-batchN.json` with
   `reviews`, `comments`, and `inline_comments` per PR
-- **Teammate list**: the GitHub logins to keep. Drop ALL comments from anyone not
+- **Reviewer list**: the GitHub logins to keep. Drop ALL comments from anyone not
   on this list before doing anything else.
 
 ## Process
 
 1. **Filter out noise** (drop these — do not emit):
-   - Comments from non-teammates (the filter list given in the prompt)
+   - Comments from anyone not on the reviewer list given in the prompt
    - Bot comments (users ending in `[bot]`, `github-actions`, etc.)
    - Author self-replies (the PR author commenting on their own PR)
    - Empty approvals (state=APPROVED with no body)
@@ -55,7 +55,7 @@ You will receive:
 
    Do NOT add categories or tags. Do NOT label patterns. Do NOT
    prioritize. Do NOT decide whether the comment is "interesting."
-   Every substantive comment from a teammate gets a bullet.
+   Every substantive comment from a listed reviewer gets a bullet.
 
 ## Output Format
 
@@ -74,8 +74,8 @@ counting.
 ```
 
 Group by reviewer. Within a reviewer, list comments in the order they
-appear in the JSON. If a reviewer has no substantive teammate comments,
-omit the section entirely. If no teammate had any substantive comments
+appear in the JSON. If a reviewer has no substantive comments, omit the
+section entirely. If no listed reviewer had any substantive comments
 in the batch, output the literal string `(no substantive teammate
 comments in batch)`.
 

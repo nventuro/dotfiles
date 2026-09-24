@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
-"""local-review-post — read/write the active "Local PR Review" session so the
-review skills (/review-as-team, /review-as-codex) can post findings as inline
-comment threads that /apply-review then applies.
+"""local-review-post — read and write the active Local Review session of the
+current repository, so review findings can be posted as inline comment threads
+and the user's triage of them acted on.
 
 Subcommands:
   status         Print JSON about the active review, or {"active": false}.
   ensure-review  Make sure a review is active, creating a "whole branch" one for
-                 the current branch if none is — so /load-pr-comments etc. always
-                 have somewhere to post. No-op when a review is already active.
+                 the current branch if none is, so posting always has a target.
+                 No-op when a review is already active.
   post           Read a findings JSON array from stdin and append each as a thread
-                 to the active review's comments.json (preserving existing threads).
-  list-actionable  Emit the threads /apply-review should act on (selection done here,
-                 not re-derived by the agent), sorted by file then line.
-  apply-results  Read /apply-review's per-thread decisions from stdin and apply them
-                 (resolve / applied / reply) to comments.json in one write.
+                 to the active review's comments.json (preserving existing threads),
+                 skipping findings already posted against the same, unchanged code.
+  list-actionable  Emit the threads awaiting action: ones to apply and ones with an
+                 unanswered reply from the user, sorted by file then line.
+  apply-results  Read per-thread decisions (resolve / applied / reply) from stdin
+                 and record them in comments.json in one write.
 
-Run from inside the worktree — the .vscode/local-reviews/ files live there. The
-written schema mirrors exactly what the extension itself writes: threads with
-uuid4 ids, ISO-millisecond UTC timestamps, 1-based line numbers, state
-"unresolved". After posting, the user runs "Local PR Review: Refresh" to see
-them, then /apply-review applies them.
+Run from inside the worktree — the .vscode/local-reviews/ files live there.
+Threads are written in the Local Review extension's storage format: uuid4 ids,
+ISO-millisecond UTC timestamps, 0-based line numbers, state "unresolved". Line
+numbers crossing this script's interface (findings in, list-actionable out) are
+1-based file line numbers, as tools and GitHub report them. The user runs
+"Local Review: Refresh" to see newly posted threads.
 
 Findings (stdin to `post`) is a JSON array; each item:
-  { "file"|"filePath": str, "line"|"startLine": int, "endLine"?: int,
+  { "file"|"filePath": str, "line"|"startLine": int (1-based), "endLine"?: int,
     "body": str (markdown; a "💡 **Suggestion:**" ```diff block applies verbatim),
     "author"?: str (default "team"),
     "avatarUrl"?: str (e.g. a GitHub avatar; shown as the author's picture) }
@@ -34,14 +36,15 @@ A finding may instead carry a "comments" array to seed a multi-comment thread
 
 import getpass
 import json
+import re
 import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Canned bodies the extension posts for triage actions — NOT genuine user replies,
-# so list-actionable must not mistake one for fresh feedback.
+# Bodies of the comments posted for triage actions. They are not genuine user
+# replies, so they never count as fresh feedback.
 _CANNED_PREFIXES = ("✅ Queue for apply", "🚫 Skipping", "Applied ✅")
 
 
@@ -115,8 +118,7 @@ def _make_comment(body, author, avatar_url, channel="local", comment_id=None, ti
 def _build_comments(f):
     """Comment list for a finding: a multi-comment `comments` array if given, else
     the single body/author/avatarUrl form. Empty-bodied entries are dropped. Each
-    comment's channel comes from the source (github-pr-to-findings tags 'github');
-    everything else defaults to 'local'."""
+    comment keeps the channel its finding gives it, defaulting to 'local'."""
     raw = f.get("comments")
     if isinstance(raw, list) and raw:
         out = []
@@ -133,6 +135,30 @@ def _build_comments(f):
     return [_make_comment(body, f.get("author"), f.get("avatarUrl"),
                           f.get("channel", "local"), f.get("commentId"),
                           f.get("timestamp"))]
+
+
+def _anchor_code(root, file_path, start, end):
+    """The current text of lines start..end (1-based, inclusive) of a repo file,
+    or None when the file or the range doesn't exist."""
+    try:
+        lines = (Path(root) / file_path).read_text().splitlines()
+    except Exception:
+        return None
+    if start < 1 or end < start or end > len(lines):
+        return None
+    return "\n".join(lines[start - 1:end])
+
+
+def _finding_keys(file_path, author, body, start, end, anchor_code):
+    """Identities under which a posted finding counts as already present: the
+    same author raising the same kind of issue (its leading `[tag]`) on the same
+    code. Keyed on the code itself when known, so a finding re-raised after its
+    code changed is posted again; on the line range otherwise."""
+    m = re.match(r"\s*\[([^\]]+)\]", body or "")
+    tag = m.group(1).strip().lower() if m else ""
+    if anchor_code is not None:
+        return {(file_path, author, tag, "code", anchor_code)}
+    return {(file_path, author, tag, "lines", start, end)}
 
 
 def _active(root):
@@ -158,10 +184,10 @@ def _git(root, *args):
 
 def _ensure_review(root):
     """(review, comments_path) for the active review, creating the single
-    per-branch review if none is active. Mirrors the extension's
-    ensureReview(<branch>) — same synthetic key (review / <branch>) and fields —
-    so the panel ADOPTS it on refresh instead of forking a second review. The
-    diff mode ('branch') is just the default view; it's not part of the key."""
+    per-branch review if none is active. It is keyed the way the extension keys
+    a per-branch review (source "review", target <branch>), so the panel adopts it
+    on refresh instead of creating a second one. The diff mode ('branch') is just
+    the default view; it's not part of the key."""
     review, comments_path = _active(root)
     if review:
         return review, comments_path
@@ -284,7 +310,7 @@ def cmd_post():
             "threads": [],
         }
     data.setdefault("threads", [])
-    # Your GitHub login (passed by /load-pr-comments). Stored once so the extension
+    # Your GitHub login. Stored once so the extension
     # treats comments you wrote on the PR as yours — keeping your own FYI notes out
     # of the triage "needs your OK" queue. Preserved across re-syncs.
     viewer_login = _arg_value("--viewer-login")
@@ -303,13 +329,21 @@ def cmd_post():
     # is already loaded is not re-created (preserving its local state / disposition /
     # applied), but any replies added to it on GitHub since the last sync ARE merged
     # in — so re-syncing a PR picks up new replies without duplicating threads or
-    # comments. Non-GitHub findings always append as fresh threads.
+    # comments. Other findings are skipped when an existing thread, in any state,
+    # already raises them on the same code: a re-run of the reviews then adds only
+    # what is new, and a finding the user resolved or ignored stays settled.
     by_comment = {}
+    existing_findings = set()
     for t in data["threads"]:
         cid = (t.get("github") or {}).get("commentId")
         if cid is not None:
             by_comment[cid] = t
-    posted = skipped = merged = repaired = 0
+        elif t.get("comments"):
+            head = t["comments"][0]
+            existing_findings |= _finding_keys(
+                t.get("filePath"), head.get("author"), head.get("body"),
+                t.get("startLine"), t.get("endLine"), (t.get("anchor") or {}).get("code"))
+    posted = skipped = merged = repaired = duplicates = 0
     for f in findings:
         fp = f.get("filePath") or f.get("file")
         comments = _build_comments(f)
@@ -362,18 +396,33 @@ def cmd_post():
             continue
         start = int(f.get("startLine") or f.get("line") or 1)
         end = int(f.get("endLine") or start)
+        stored_start, stored_end = start - 1, end - 1
+        anchor = f.get("anchor")
+        if not gh:
+            # The code the finding was raised against, so the extension can keep the
+            # thread on it as lines shift and mark it outdated once it changes.
+            if not anchor:
+                code = _anchor_code(root, fp, start, end)
+                anchor = {"code": code} if code is not None else None
+            keys = _finding_keys(fp, comments[0]["author"], comments[0]["body"],
+                                 stored_start, stored_end, (anchor or {}).get("code"))
+            legacy = _finding_keys(fp, comments[0]["author"], comments[0]["body"],
+                                   stored_start, stored_end, None)
+            if (keys | legacy) & existing_findings:
+                duplicates += 1
+                continue
         thread = {
             "id": str(uuid.uuid4()),
             "filePath": fp,
-            "startLine": start,
-            "endLine": end,
+            "startLine": stored_start,
+            "endLine": stored_end,
             "state": "unresolved",
             "comments": comments,
         }
         if gh:
             thread["github"] = gh
-        if f.get("anchor"):
-            thread["anchor"] = f["anchor"]
+        if anchor:
+            thread["anchor"] = anchor
         data["threads"].append(thread)
         if cid is not None:
             by_comment[cid] = thread
@@ -386,6 +435,7 @@ def cmd_post():
         "posted": posted,
         "merged": merged,
         "skipped": skipped,
+        "duplicates": duplicates,
         "repaired": repaired,
         "comments_file": str(comments_path),
         "total_threads": len(data["threads"]),
@@ -394,9 +444,8 @@ def cmd_post():
 
 
 def cmd_list_actionable():
-    """Emit the threads /apply-review should act on, so the agent doesn't re-scan or
-    re-derive the selection. Each carries everything needed to decide + edit, sorted
-    by file then line so the agent reads each file once. Selection:
+    """Emit the threads awaiting action. Each carries everything needed to decide
+    and edit, sorted by file then line so each file needs reading once. Selection:
       - `reason: "apply"`  unresolved, not applied, AND (you authored it OR it's a
                            not-yours thread you queued, disposition=accepted).
       - `reason: "reply"`  unresolved, and its LAST comment is a fresh reply from you
@@ -451,8 +500,8 @@ def cmd_list_actionable():
         out.append({
             "id": t["id"],
             "filePath": t["filePath"],
-            "startLine": t.get("startLine"),
-            "endLine": t.get("endLine"),
+            "startLine": None if t.get("startLine") is None else t["startLine"] + 1,
+            "endLine": None if t.get("endLine") is None else t["endLine"] + 1,
             "reason": reason,
             "isMine": head_author == user,
             "isGithub": bool(t.get("github")),
@@ -473,8 +522,8 @@ def cmd_list_actionable():
 
 
 def cmd_apply_results():
-    """Apply /apply-review's per-thread decisions to comments.json in ONE write, so
-    the agent doesn't hand-edit the file (and generate ids/timestamps) per thread.
+    """Record per-thread decisions in comments.json in ONE write, generating the
+    comment ids and timestamps.
     Reads a JSON array from stdin; each item:
       { "id": <threadId>, "action": "resolve"|"applied"|"reply", "reply"?: str }
     Semantics (replies are always author 'claude', channel 'local'):

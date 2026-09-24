@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """github-pr-to-findings — turn a GitHub PR's inline review comments
-(`GET /repos/:o/:r/pulls/:n/comments` JSON) into the findings array that
-local-review-post.py reads, for /load-pr-comments.
+(`GET /repos/:o/:r/pulls/:n/comments` JSON) into local review findings: a JSON
+array of threads, each with a file, a line range, and its comments.
 
 What it does:
   * groups reply chains (in_reply_to_id) into a single thread;
+  * drops threads written entirely by review bots;
   * maps each reviewer to author=login + avatarUrl=avatar_url;
-  * rewrites GitHub ```suggestion blocks into the Local Review extension's own
-    "Suggest a Change" form — `💡 **Suggestion:**` + a ```diff block with
-    `- <original>` / `+ <suggested>` lines — using the comment's diff_hunk for
-    the original line(s). That makes them render as a red/green diff AND lets
-    /apply-review apply them verbatim (it understands that exact format).
+  * rewrites GitHub ```suggestion blocks into the suggested-change form review
+    threads use — `💡 **Suggestion:**` + a ```diff block with `- <original>` /
+    `+ <suggested>` lines — using the comment's diff_hunk for the original
+    line(s), so they render as a diff and can be applied verbatim.
 
 Usage: github-pr-to-findings.py [comments.json]   (reads stdin if no path).
 Emits the findings JSON on stdout.
@@ -27,13 +27,18 @@ PR_URL_RE = re.compile(r"/repos/([^/]+/[^/]+)/pulls/(\d+)")
 
 
 def _github_ref(comment):
-    """{repo, prNumber, commentId} for a review comment — the stable identity the
-    extension stores so a re-sync upserts (no dup). commentId is the REST
-    databaseId."""
+    """{repo, prNumber, commentId} for a review comment — the stable identity kept
+    on the thread, so importing the PR again updates it instead of duplicating it.
+    commentId is the REST databaseId."""
     m = PR_URL_RE.search(comment.get("pull_request_url") or "")
     if not m:
         return None
     return {"repo": m.group(1), "prNumber": int(m.group(2)), "commentId": comment.get("id")}
+
+
+def _is_bot(comment):
+    user = comment.get("user") or {}
+    return user.get("type") == "Bot" or (user.get("login") or "").endswith("[bot]")
 
 
 def _new_side_lines(diff_hunk):
@@ -106,6 +111,9 @@ def main():
     findings = []
     for key in order:
         cs = threads[key]
+        # A review bot's thread matters only once a person has engaged with it.
+        if all(_is_bot(c) for c in cs):
+            continue
         head = cs[0]
         path = head.get("path")
         if not path:
@@ -125,9 +133,8 @@ def main():
                 "avatarUrl": (x.get("user") or {}).get("avatar_url"),
                 "channel": "github",
                 "commentId": x.get("id"),
-                # The comment's real posting time, so the extension shows "3 days ago"
-                # instead of the import time. created_at = when it was posted (updated_at
-                # would jump on an edit); the extension renders it relative to now.
+                # When the comment was posted, not when it was imported. created_at
+                # rather than updated_at, which jumps on an edit.
                 "timestamp": x.get("created_at"),
             } for x in cs],
         }
