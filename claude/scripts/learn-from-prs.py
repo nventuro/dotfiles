@@ -11,8 +11,8 @@ Usage:
 
   learn-from-prs.py fetch-comments [--out-dir DIR] <repo#pr> [<repo#pr> ...]
     Fetch the review bodies, discussion comments and inline comments the
-    user and teammates left on specific PRs, excluding the PR author's own.
-    PRs with none
+    user and teammates left on specific PRs, excluding the PR author's own
+    except the user's replies to others on the user's PRs. PRs with none
     are left out. With --out-dir, writes them to DIR/comments-batchN.json in
     batches sized for one map-stage agent each and prints the batch list;
     otherwise prints them all. A bare number is read as a PR in the first
@@ -53,6 +53,9 @@ DEFAULT_TRACKER = str(TEAM_TRACKER)
 # GitHub's diff hunk ends at the commented line but can start hundreds of lines
 # above it, and it dominates the size of the review data.
 HUNK_TAIL_LINES = 8
+# The comment a reply answers is only there so the reply can be understood, so
+# it is cut short to keep it from dominating the batch.
+REPLY_CONTEXT_CHARS = 700
 # Sized so a map-stage agent can read a whole batch and emit a bullet per
 # comment within its context and output limits.
 MAX_BATCH_COMMENTS = 100
@@ -140,8 +143,8 @@ def check_signal_count(repo, pr_number):
     return n_reviews + n_comments + n_inline
 
 
-def fetch_inline_comments(repo, pr_number):
-    """Fetch inline review comments for a PR."""
+def fetch_raw_inline_comments(repo, pr_number):
+    """Inline review comments for a PR as the API returns them."""
     out = run_gh([
         "api", f"repos/{repo}/pulls/{pr_number}/comments", "--paginate",
     ], timeout=30)
@@ -153,19 +156,28 @@ def fetch_inline_comments(repo, pr_number):
         return []
     # Filter to substantive comments
     return [
-        {
-            "user": c.get("user", {}).get("login", "unknown"),
-            "body": c.get("body", ""),
-            "path": c.get("path", ""),
-            "line": c.get("line") or c.get("original_line"),
-            "diff_hunk": "\n".join(
-                c.get("diff_hunk", "").splitlines()[-HUNK_TAIL_LINES:]
-            ),
-        }
-        for c in comments
+        c for c in comments
         if c.get("body", "").strip()
         and not c.get("user", {}).get("login", "").endswith("[bot]")
     ]
+
+
+def trim_inline_comment(c):
+    return {
+        "user": c.get("user", {}).get("login", "unknown"),
+        "body": c.get("body", ""),
+        "path": c.get("path", ""),
+        "line": c.get("line") or c.get("original_line"),
+        "diff_hunk": "\n".join(
+            c.get("diff_hunk", "").splitlines()[-HUNK_TAIL_LINES:]
+        ),
+    }
+
+
+def fetch_inline_comments(repo, pr_number):
+    """Fetch inline review comments for a PR."""
+    return [trim_inline_comment(c)
+            for c in fetch_raw_inline_comments(repo, pr_number)]
 
 
 def fetch_pr_reviews_and_comments(repo, pr_number):
@@ -248,17 +260,73 @@ def cmd_fetch(since):
     json.dump(high_signal, sys.stdout, indent=2)
 
 
+def replies_to_others(posts):
+    """Yields each of the user's posts that follows someone else's, paired
+    with the latest post by someone else before it. `posts` are
+    `(user, body, post)` tuples in posting order."""
+    answered = None
+    for user, body, post in posts:
+        if user != LOGIN:
+            answered = {"user": user, "body": body[:REPLY_CONTEXT_CHARS]}
+        elif answered is not None:
+            yield post, answered
+
+
+def own_pr_replies(pr_data, raw_inline):
+    """The user's replies to others on the user's own PR, as the review,
+    discussion and inline comment lists of `fetch_review_comments`, each
+    carrying the post it answers as `in_reply_to`."""
+    # GitHub does not thread review bodies and discussion comments, so each
+    # is taken to answer the latest one by someone else.
+    timeline = sorted(
+        [(r.get("submittedAt") or "", "review", r)
+         for r in pr_data.get("reviews", [])]
+        + [(c.get("createdAt") or "", "comment", c)
+           for c in pr_data.get("comments", [])],
+        key=lambda p: p[0],
+    )
+    posts = [
+        (post["author"]["login"], post["body"], (kind, post))
+        for _, kind, post in timeline
+        if post.get("body", "").strip()
+        and not post["author"]["login"].endswith("[bot]")
+    ]
+    reviews, comments = [], []
+    for (kind, post), answered in replies_to_others(posts):
+        entry = {"user": LOGIN, "body": post["body"], "in_reply_to": answered}
+        if kind == "review":
+            reviews.append({**entry, "state": post["state"]})
+        else:
+            comments.append(entry)
+
+    # Every reply in an inline thread points at the thread's first comment,
+    # so threads are rebuilt in posting order to find what each reply follows.
+    threads = {}
+    for c in sorted(raw_inline, key=lambda c: c["created_at"]):
+        threads.setdefault(c.get("in_reply_to_id") or c["id"], []).append(c)
+    inline = [
+        {**trim_inline_comment(c), "in_reply_to": answered}
+        for thread in threads.values()
+        for c, answered in replies_to_others(
+            (c["user"]["login"], c["body"], c) for c in thread
+        )
+    ]
+    return reviews, comments, inline
+
+
 def fetch_review_comments(repo, pr_number):
     """The PR's title and author plus the review bodies, discussion comments
-    and inline comments the user and teammates left on it, excluding the
-    author's own."""
+    and inline comments the user and teammates left on it. The author's own
+    are left out, except the user's replies to others on the user's own PRs,
+    which carry the post they answer as `in_reply_to`."""
     pr_data = fetch_pr_reviews_and_comments(repo, pr_number)
     author = pr_data.get("author", {}).get("login", "?")
+    raw_inline = fetch_raw_inline_comments(repo, pr_number)
 
     def by_reviewer(user, body):
         return user in REVIEWERS and user != author and body.strip()
 
-    return {
+    pr = {
         "repo": repo,
         "number": pr_number,
         "title": pr_data.get("title", "?"),
@@ -281,10 +349,16 @@ def fetch_review_comments(repo, pr_number):
             if by_reviewer(c["author"]["login"], c["body"])
         ],
         "inline_comments": [
-            c for c in fetch_inline_comments(repo, pr_number)
+            c for c in map(trim_inline_comment, raw_inline)
             if by_reviewer(c["user"], c["body"])
         ],
     }
+    if author == LOGIN:
+        reviews, comments, inline = own_pr_replies(pr_data, raw_inline)
+        pr["reviews"] += reviews
+        pr["comments"] += comments
+        pr["inline_comments"] += inline
+    return pr
 
 
 def comment_count(pr):

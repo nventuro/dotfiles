@@ -31,22 +31,31 @@ You will receive:
 - **Reviewer list**: the GitHub logins to keep. Drop ALL comments from anyone not
   on this list before doing anything else.
 
+A comment with an `in_reply_to` field is a reply by the PR author to someone
+else's comment, and `in_reply_to` holds the comment it answers. That answered
+comment is context only: never emit a bullet for it.
+
 ## Process
 
 1. **Filter out noise** (drop these — do not emit):
    - Comments from anyone not on the reviewer list given in the prompt
    - Bot comments (users ending in `[bot]`, `github-actions`, etc.)
-   - Author self-replies (the PR author commenting on their own PR)
+   - Author self-replies (the PR author commenting on their own PR),
+     unless the comment has an `in_reply_to` field
    - Empty approvals (state=APPROVED with no body)
    - Emoji-only / one-line LGTM bodies ("Nice!", "thumbsup", "looks good",
      "🚀")
+   - Bare acknowledgements with no reasoning ("done", "fixed", "good
+     catch", "addressed in <commit>")
    - Trivial typo-only suggestion blocks (a single character/word fix
      with no commentary)
 
 2. **For each remaining substantive comment**, emit ONE bullet with:
    - Reviewer login (as the section header)
    - 1-sentence neutral paraphrase of what the reviewer asked for
-     (description, not interpretation — don't editorialize)
+     (description, not interpretation — don't editorialize); for a reply,
+     the position it takes on the comment it answers (e.g. "pushes back
+     on a request to X because Y")
    - One short verbatim quote (1-2 sentences max, ≤200 chars; truncate
      mid-sentence with `...` if needed)
    - The PR's full key exactly as it appears in the JSON

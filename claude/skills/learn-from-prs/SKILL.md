@@ -49,8 +49,9 @@ on the smarter main thread. Don't invert this.
    ```
    Pass the `key` field from step 1 verbatim (e.g. `owner/repo#585`) — a
    bare number is read as a PR in the first configured repo. The script
-   keeps only comments by you and your teammates, never the PR author's own,
-   trims each inline comment's diff context,
+   keeps only comments by you and your teammates, never the PR author's own
+   except your replies to others on your PRs (each carrying the comment it
+   answers as `in_reply_to`), trims each inline comment's diff context,
    and writes `DIR/comments-batchN.json` files sized for one map agent each;
    it prints `[{path, prs, comments}]`. It costs two `gh` calls per PR, so
    run it in the background for large sets.
