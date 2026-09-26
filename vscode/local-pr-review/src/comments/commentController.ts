@@ -545,9 +545,11 @@ export class ReviewCommentController {
             ? vscode.CommentThreadState.Resolved
             : vscode.CommentThreadState.Unresolved;
         if (thread.state !== desiredState) { thread.state = desiredState; }
-        const desiredCollapse = closed
-            ? vscode.CommentThreadCollapsibleState.Collapsed
-            : vscode.CommentThreadCollapsibleState.Expanded;
+        // Only To do threads open in the editor; the rest fold to their gutter icon,
+        // so what's open is what needs you.
+        const desiredCollapse = stage === 'todo'
+            ? vscode.CommentThreadCollapsibleState.Expanded
+            : vscode.CommentThreadCollapsibleState.Collapsed;
         if (thread.collapsibleState !== desiredCollapse) { thread.collapsibleState = desiredCollapse; }
         // Nothing reads a closed thread again, so a reply there would go unanswered.
         if (thread.canReply !== !closed) { thread.canReply = !closed; }

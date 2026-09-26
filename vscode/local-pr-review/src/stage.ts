@@ -33,7 +33,8 @@ export const STAGE_LABEL: Record<ThreadStage, string> = {
 export function stageTag(thread: ReviewThread): string {
     switch (stageOf(thread)) {
         case 'claude':
-            return thread.request === 'apply-close' ? 'apply & close'
+            // "and", not "&": the editor's thread header shows "&" as "&amp;".
+            return thread.request === 'apply-close' ? 'apply and close'
                 : thread.request === 'apply' ? 'apply'
                 : 'reply';
         case 'closed':

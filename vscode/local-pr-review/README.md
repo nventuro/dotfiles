@@ -30,7 +30,8 @@ now maintained here. The original license is retained in `LICENSE`.
   A thread's header offers the actions that fit its stage: **Apply & close**,
   **Apply**, **Later**, **Discard**, **Undo** and **Reopen**. Hovering a button
   says what it does. Replying, or writing a comment of your own, sends the
-  thread to Claude.
+  thread to Claude. Only To do threads open in the editor; the rest are
+  collapsed to their gutter icon.
 - **Comments navigator** grouping threads by stage, each row tagged with why
   it is there (`new`, `Claude replied`, `applied`, …) and offering the same
   actions. **Step through** walks the To do threads one at a time.
