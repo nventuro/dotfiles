@@ -1,17 +1,11 @@
 import * as vscode from 'vscode';
 import { StorageService } from '../storage/storageService';
-import { ReviewThread, ReviewComment } from '../types';
+import { ApplyRequest, ReviewThread, ReviewComment, ThreadStage } from '../types';
 import { GitService } from '../git/gitService';
-import { avatarFor, preloadAvatars } from './avatars';
+import { getAvatarUri } from './avatars';
 import { isOwnAuthor } from '../identity';
+import { moveThread, stageOf, stageTag, STAGE_LABEL } from '../stage';
 import * as os from 'os';
-
-// Approving / ignoring a not-your-own suggestion posts the intent as a real
-// comment (not just a hidden flag), so anyone reading the thread sees your decision as text
-// and you can add nuance in the same thread. Posted as a 'local' comment authored
-// by you; the QUEUE_BODY is also matched on undo to remove the orphaned approval.
-export const QUEUE_BODY = '✅ Queue for apply — please apply this suggestion.';
-export const SKIP_BODY = '🚫 Skipping this one.';
 
 interface ThreadData {
     threadId: string;
@@ -29,9 +23,6 @@ export class ReviewCommentController {
     private gitService: GitService | undefined;
     private reviewableFiles = new Set<string>();
     private readonly ownUser = os.userInfo().username;
-    // Your GitHub login (CommentsFile.viewerLogin), refreshed whenever comments are
-    // loaded for styling. Lets a comment you wrote on the PR count as yours.
-    private viewerLogin: string | undefined;
 
     constructor(
         private storageService: StorageService,
@@ -123,7 +114,6 @@ export class ReviewCommentController {
     async placeThreadsInDiff(left: vscode.Uri, right: vscode.Uri, filePath: string): Promise<void> {
         const comments = this.storageService.loadComments();
         if (!comments) { return; }
-        this.viewerLogin = comments.viewerLogin;
 
         const placed = new Set<string>();
         if (right.scheme === 'file') {
@@ -215,14 +205,13 @@ export class ReviewCommentController {
      * Disposes instances whose thread was deleted, and
      * creates file:// instances for threads that have none yet.
      */
-    /** Is this author you — OS username or your GitHub login? */
+    /** Is this author you? */
     private isOwn(author: string): boolean {
-        return isOwnAuthor(author, this.ownUser, this.viewerLogin);
+        return isOwnAuthor(author, this.ownUser);
     }
 
     refreshThreadComments(): void {
         const comments = this.storageService.loadComments();
-        this.viewerLogin = comments?.viewerLogin;
         const byId = new Map((comments?.threads ?? []).map(t => [t.id, t]));
 
         for (const [key, thread] of [...this.threads]) {
@@ -277,7 +266,6 @@ export class ReviewCommentController {
      */
     async recomputeOutdated(): Promise<void> {
         const comments = this.storageService.loadComments();
-        this.viewerLogin = comments?.viewerLogin;
         const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
         if (!comments || !workspaceUri) {
             this.storageService.outdatedThreadIds = new Set();
@@ -357,7 +345,7 @@ export class ReviewCommentController {
         if (this.storageService.outdatedThreadIds.has(stored.id) && stored.anchor) {
             out.push(this.makeSnapshotComment(stored));
         }
-        out.push(...stored.comments.map(c => this.toVscodeComment(c, !!stored.github)));
+        out.push(...stored.comments.map(c => this.toVscodeComment(c)));
         return out;
     }
 
@@ -370,14 +358,13 @@ export class ReviewCommentController {
     private renderSignature(stored: ReviewThread): string {
         const outdated = this.storageService.outdatedThreadIds.has(stored.id);
         return JSON.stringify({
-            st: stored.state,
-            di: stored.disposition,
+            sg: stageOf(stored),
+            rq: stored.request,
             ap: stored.applied,
-            gh: !!stored.github,
             ow: stored.onWorkingTree,
             od: outdated,
             an: outdated ? [stored.anchor?.code, stored.startLine, stored.endLine] : null,
-            cs: stored.comments.map(c => [c.id, c.body, c.author, c.channel, c.timestamp]),
+            cs: stored.comments.map(c => [c.id, c.body, c.author, c.timestamp]),
         });
     }
 
@@ -399,7 +386,7 @@ export class ReviewCommentController {
             body,
             author: {
                 name: 'Local Review',
-                iconPath: avatarFor(this.avatarDir, 'Local Review', undefined, true),
+                iconPath: getAvatarUri(this.avatarDir, 'Local Review'),
             },
             mode: vscode.CommentMode.Preview,
             contextValue: 'snapshot',
@@ -428,9 +415,6 @@ export class ReviewCommentController {
 
         const comments = this.storageService.loadComments();
         if (!comments || comments.threads.length === 0) { return; }
-        this.viewerLogin = comments.viewerLogin;
-
-        await this.preloadAvatars();
 
         const gs = this.gitService;
         if (!gs || !sourceBranch || !targetBranch) {
@@ -541,78 +525,54 @@ export class ReviewCommentController {
     }
 
     /**
-     * Set a thread's visual/contextual state (resolved collapse, label, and the
+     * Set a thread's visual/contextual state (collapse, label, reply box, and the
      * `contextValue` that gates the inline actions) from its stored form. The
-     * contextValue is a dot-joined token set the menus match by regex:
-     *   - `resolved` | `unresolved`           — base state
-     *   - `…​.proposable`                       — not your own comment, not yet accepted
-     *     (shows "Queue for apply" + "Ignore")
-     *   - `…​.accepted`                         — you queued it for apply
-     * Your own comments carry no proposable/accepted token (they always apply).
+     * contextValue is the stage, plus `.apply` / `.apply-close` on a 'claude' thread
+     * carrying that request; the menus match it by regex.
      * Does NOT touch `comments` — callers reassign that only when it changed, to
      * avoid the re-render that would re-expand a collapsed thread.
      */
     private styleThread(thread: vscode.CommentThread, stored: ReviewThread): void {
-        const resolved = stored.state === 'resolved';
-        const accepted = stored.disposition === 'accepted';
-        const dismissed = stored.disposition === 'dismissed';
-        const proposable = !this.isOwn(stored.comments[0]?.author ?? '');
+        const stage = stageOf(stored);
+        const closed = stage === 'closed';
         const outdated = this.storageService.outdatedThreadIds.has(stored.id);
 
         // Only assign when the value actually changes. Re-asserting collapsibleState
         // re-expands the thread and can yank editor focus onto it — bad if it fires
         // (via a background refresh) while you're typing in another thread. The guard
         // also means we stop fighting a thread the user manually collapsed.
-        const desiredState = resolved
+        const desiredState = closed
             ? vscode.CommentThreadState.Resolved
             : vscode.CommentThreadState.Unresolved;
         if (thread.state !== desiredState) { thread.state = desiredState; }
-        const desiredCollapse = resolved
+        const desiredCollapse = closed
             ? vscode.CommentThreadCollapsibleState.Collapsed
             : vscode.CommentThreadCollapsibleState.Expanded;
         if (thread.collapsibleState !== desiredCollapse) { thread.collapsibleState = desiredCollapse; }
-        thread.label = resolved ? 'Resolved'
-            : stored.applied ? 'Applied'
-            : dismissed ? 'Muted'
-            : outdated ? 'Outdated'
-            : accepted ? 'Accepted'
-            : undefined;
+        // Nothing reads a closed thread again, so a reply there would go unanswered.
+        if (thread.canReply !== !closed) { thread.canReply = !closed; }
+        thread.label = [STAGE_LABEL[stage], stageTag(stored), outdated ? 'outdated' : '']
+            .filter(Boolean)
+            .join(' · ');
 
         // NOTE: "outdated" is surfaced via the thread LABEL + the navigator tag, NOT
-        // a contextValue token. It must stay OUT of contextValue — the inline-action
-        // `when` clauses anchor on the exact token set (e.g. Resolve = `^unresolved$`,
-        // Ignore = `^unresolved\.proposable$`), so an extra `.outdated` token would
-        // hide those buttons on outdated threads (you couldn't resolve them).
-        const tokens = [resolved ? 'resolved' : 'unresolved'];
-        // A muted ("skip always") thread carries `dismissed` instead of
-        // proposable/accepted — that swaps its inline Queue/Ignore for a single
-        // Restore, without resolving it or touching GitHub.
-        if (!resolved && dismissed) {
-            tokens.push('dismissed');
-        } else if (proposable) {
-            tokens.push(accepted ? 'accepted' : 'proposable');
-        }
-        if (stored.github) { tokens.push('github'); }
-        thread.contextValue = tokens.join('.');
+        // a contextValue token. The inline-action `when` clauses anchor on the exact
+        // token set (e.g. Later = `todo`), so an extra `.outdated` token would hide
+        // those buttons on outdated threads.
+        thread.contextValue = stage === 'claude' && stored.request
+            ? `${stage}.${stored.request}`
+            : stage;
     }
 
     /** Re-style every live instance of a logical thread from its current stored form. */
     private restyleAll(threadId: string): void {
         const comments = this.storageService.loadComments();
-        this.viewerLogin = comments?.viewerLogin;
         const stored = comments?.threads.find(t => t.id === threadId);
         if (!stored) { return; }
         for (const t of this.threads.values()) {
             const d = (t as any).__threadData as ThreadData | undefined;
             if (d?.threadId === threadId) { this.styleThread(t, stored); }
         }
-    }
-
-    /** Download+cache any GitHub avatars referenced by the active review (best-effort). */
-    async preloadAvatars(): Promise<void> {
-        const comments = this.storageService.loadComments();
-        if (!comments) { return; }
-        await preloadAvatars(this.avatarDir, comments.threads.flatMap(t => t.comments));
     }
 
     private createVscodeThread(uri: vscode.Uri, savedThread: ReviewThread, key?: string, rangeOverride?: vscode.Range): void {
@@ -634,31 +594,21 @@ export class ReviewCommentController {
         this.threads.set(threadKey, thread);
     }
 
-    private toVscodeComment(comment: ReviewComment, isGithubThread = false): vscode.Comment {
-        // 'github' = part of the imported PR conversation; 'local' = a private note,
-        // never synced — badged "local" so it's clear it
-        // won't reach GitHub. Legacy comments (no channel) are inferred: on a GitHub
-        // thread, the reviewer's comments are github, your/Claude notes are local.
-        const channel: 'github' | 'local' = comment.channel
-            ?? ((isGithubThread && !this.isOwn(comment.author) && comment.author !== 'claude')
-                ? 'github' : 'local');
+    private toVscodeComment(comment: ReviewComment): vscode.Comment {
         const displayName = this.isOwn(comment.author) ? 'You' : comment.author;
-        const role = this.authorLabel(comment.author);
-        const label = channel === 'github'
-            ? role
-            : (role ? `${role} · local` : 'local');
         const vscodeComment: vscode.Comment = {
             body: new vscode.MarkdownString(comment.body),
             author: {
                 name: displayName,
-                // Local comments get a badged avatar so the private channel reads
-                // from the picture too, not just the label.
-                iconPath: avatarFor(this.avatarDir, displayName, comment.avatarUrl, channel === 'local'),
+                iconPath: getAvatarUri(this.avatarDir, displayName),
             },
             mode: vscode.CommentMode.Preview,
-            contextValue: 'canEdit',
+            // Only your own comments can be edited or deleted: a reviewer's finding
+            // must stay as posted, since a re-run of the review recognizes it by its
+            // text and a deleted one would be posted again.
+            contextValue: this.isOwn(comment.author) ? 'canEdit' : undefined,
             timestamp: new Date(comment.timestamp),
-            label,
+            label: this.authorLabel(comment.author),
         };
         // Keep the storage id on the rendered comment so edits map back.
         (vscodeComment as any).__id = comment.id;
@@ -717,128 +667,29 @@ export class ReviewCommentController {
         return undefined;
     }
 
-    resolveThread(thread: vscode.CommentThread): void {
-        const data = (thread as any).__threadData as ThreadData | undefined;
-        if (!data) { return; }
-
-        this.storageService.resolveThread(data.threadId);
-        this.restyleAll(data.threadId);
+    /** The stored thread id behind a live comment thread, if it has one. */
+    threadIdOf(thread: vscode.CommentThread): string | undefined {
+        return ((thread as any).__threadData as ThreadData | undefined)?.threadId;
     }
 
-    unresolveThread(thread: vscode.CommentThread): void {
-        const data = (thread as any).__threadData as ThreadData | undefined;
-        if (!data) { return; }
-
-        this.storageService.unresolveThread(data.threadId);
-        this.restyleAll(data.threadId);
-    }
-
-    /** "Queue for apply" — approve a not-your-own thread to be applied. */
-    acceptThread(thread: vscode.CommentThread): void {
-        const data = (thread as any).__threadData as ThreadData | undefined;
-        if (data) { this.queueThreadById(data.threadId); }
-    }
-
-    /** "Ignore" — decline a not-your-own proposal: leave a skip note and resolve it. */
-    ignoreThread(thread: vscode.CommentThread): void {
-        const data = (thread as any).__threadData as ThreadData | undefined;
-        if (data) { this.ignoreThreadById(data.threadId); }
-    }
-
-    /** Undo "queue for apply" — back to an untriaged proposal. */
-    unacceptThread(thread: vscode.CommentThread): void {
-        const data = (thread as any).__threadData as ThreadData | undefined;
-        if (data) { this.unqueueThreadById(data.threadId); }
-    }
-
-    /** "Skip always" — mute a not-your-own proposal (out of the queue, untouched on GitHub). */
-    muteThread(thread: vscode.CommentThread): void {
-        const data = (thread as any).__threadData as ThreadData | undefined;
-        if (data) { this.muteThreadById(data.threadId); }
-    }
-
-    /** "Restore" — un-mute a thread you skipped-always, back to the queue. */
-    unmuteThread(thread: vscode.CommentThread): void {
-        const data = (thread as any).__threadData as ThreadData | undefined;
-        if (data) { this.unmuteThreadById(data.threadId); }
+    /** Move a thread to `stage`, with an apply request when handing it to Claude. */
+    moveThreadById(threadId: string, stage: ThreadStage, request?: ApplyRequest): void {
+        this.storageService.updateThread(threadId, t => moveThread(t, stage, request));
+        this.refreshThreadComments();
     }
 
     /**
-     * Queue a thread for applying: set the `accepted` disposition (the machine
-     * cache the navigator/menus read) AND post a 'local' "queue for apply" comment
-     * so the intent is legible in the thread. Both the inline button and the triage
-     * picker route here, so they behave identically.
+     * Post a reply authored by you and hand the thread to Claude, keeping any apply
+     * request it already has so the reply refines it. Used where there is no live
+     * reply box (the navigator and the step-through picker).
      */
-    queueThreadById(threadId: string): void {
-        this.storageService.setDisposition(threadId, 'accepted');
-        this.storageService.addReplyToThread(threadId, QUEUE_BODY, this.ownUser);
-        this.refreshThreadComments();
-    }
-
-    /** Ignore a proposal: post a 'local' skip note, then resolve the thread. */
-    ignoreThreadById(threadId: string): void {
-        this.storageService.addReplyToThread(threadId, SKIP_BODY, this.ownUser);
-        this.storageService.resolveThread(threadId);
-        this.refreshThreadComments();
-    }
-
-    /** Post a freeform 'local' reply authored by you (used by the picker's Reply…). */
     replyToThreadById(threadId: string, text: string): void {
         this.storageService.addReplyToThread(threadId, text, this.ownUser);
+        this.storageService.updateThread(threadId, t => moveThread(t, 'claude', t.request));
         this.refreshThreadComments();
     }
 
-    /** Resolve a thread by id (used by the triage picker, which has no live instance). */
-    resolveThreadById(threadId: string): void {
-        this.storageService.resolveThread(threadId);
-        this.refreshThreadComments();
-    }
-
-    /**
-     * Resolve/reply on a thread by id even when it has NO live inline instance —
-     * the case for a comment whose anchored code was committed/rebased away, so it
-     * renders in no diff and has no inline Resolve button. The Comments navigator
-     * acts through these so such a thread can still be closed.
-     */
-    unresolveThreadById(threadId: string): void {
-        this.storageService.unresolveThread(threadId);
-        this.refreshThreadComments();
-    }
-
-    /**
-     * Undo a queue-for-apply: clear the disposition and, if the thread's last
-     * comment is the canned approval you just posted, remove it — so undo leaves no
-     * orphaned "queue for apply" note behind.
-     */
-    unqueueThreadById(threadId: string): void {
-        this.storageService.setDisposition(threadId, undefined);
-        const stored = this.storageService.loadComments()?.threads.find(t => t.id === threadId);
-        const last = stored?.comments[stored.comments.length - 1];
-        if (last && last.author === this.ownUser && last.body === QUEUE_BODY) {
-            this.storageService.deleteComment(threadId, last.id);
-        }
-        this.refreshThreadComments();
-    }
-
-    /**
-     * "Skip always": set the `dismissed` disposition so the thread drops out of the
-     * triage queue + needs-OK count, but stays UNRESOLVED and untouched on GitHub —
-     * for a note you keep open for reviewers but don't want to act on or re-triage.
-     * No comment is posted (it's a silent mute); restyle swaps its inline buttons.
-     */
-    muteThreadById(threadId: string): void {
-        this.storageService.setDisposition(threadId, 'dismissed');
-        this.restyleAll(threadId);
-        this.refreshThreadComments();
-    }
-
-    /** Undo "skip always": clear the dismissed disposition so it returns to the queue. */
-    unmuteThreadById(threadId: string): void {
-        this.storageService.setDisposition(threadId, undefined);
-        this.restyleAll(threadId);
-        this.refreshThreadComments();
-    }
-
+    /** Post a reply from the thread's reply box and hand the thread to Claude. */
     addReply(thread: vscode.CommentThread, text: string): void {
         const data = (thread as any).__threadData as ThreadData | undefined;
         if (!data) { return; }
@@ -846,7 +697,9 @@ export class ReviewCommentController {
         const author = os.userInfo().username;
         const comment = this.storageService.addReplyToThread(data.threadId, text, author);
         if (comment) {
+            this.storageService.updateThread(data.threadId, t => moveThread(t, 'claude', t.request));
             thread.comments = [...thread.comments, this.toVscodeComment(comment)];
+            this.restyleAll(data.threadId);
         }
     }
 

@@ -72,13 +72,13 @@ export class StorageService {
             filePath,
             startLine,
             endLine,
-            state: 'unresolved',
+            // A comment you write is an instruction, so it goes straight to Claude.
+            stage: 'claude',
             comments: [{
                 id: crypto.randomUUID(),
                 body,
                 author,
                 timestamp: new Date().toISOString(),
-                channel: 'local',
             }],
             onWorkingTree,
         };
@@ -100,7 +100,6 @@ export class StorageService {
             body,
             author,
             timestamp: new Date().toISOString(),
-            channel: 'local',
         };
 
         thread.comments.push(comment);
@@ -108,24 +107,14 @@ export class StorageService {
         return comment;
     }
 
-    resolveThread(threadId: string): void {
+    /** Change one stored thread with `change` and save it; a no-op if it's gone. */
+    updateThread(threadId: string, change: (thread: ReviewThread) => void): void {
         const comments = this.loadComments();
         if (!comments) { return; }
 
         const thread = comments.threads.find(t => t.id === threadId);
         if (thread) {
-            thread.state = 'resolved';
-            this.saveComments(comments);
-        }
-    }
-
-    unresolveThread(threadId: string): void {
-        const comments = this.loadComments();
-        if (!comments) { return; }
-
-        const thread = comments.threads.find(t => t.id === threadId);
-        if (thread) {
-            thread.state = 'unresolved';
+            change(thread);
             this.saveComments(comments);
         }
     }
@@ -138,22 +127,6 @@ export class StorageService {
         const thread = comments.threads.find(t => t.id === threadId);
         if (thread) {
             thread.anchor = anchor;
-            this.saveComments(comments);
-        }
-    }
-
-    /** Record your triage of a proposable (not-your-own) thread: accepted, dismissed, or cleared. */
-    setDisposition(threadId: string, disposition: 'accepted' | 'dismissed' | undefined): void {
-        const comments = this.loadComments();
-        if (!comments) { return; }
-
-        const thread = comments.threads.find(t => t.id === threadId);
-        if (thread) {
-            if (disposition) {
-                thread.disposition = disposition;
-            } else {
-                delete thread.disposition;
-            }
             this.saveComments(comments);
         }
     }

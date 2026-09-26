@@ -10,7 +10,7 @@ allowed-tools: [Read, Edit, Write]
 Record a preference the user states explicitly into
 `~/.claude/local-review/my-learnings.md`, the store whose bold headlines a
 SessionStart hook injects into sessions in the configured repos. This is the
-manual entry point; /apply-review and /learn-from-prs add to the same file
+manual entry point; /address-review and /learn-from-prs add to the same file
 automatically. Use the same file and format for all three.
 
 Note: if the request is "whenever EVENT happens, do X automatically", that

@@ -139,7 +139,7 @@ every reviewer whose pattern it matches.
 ```
 
 **Output spec**, pasted where a template says `<output spec>` (the learnings
-pass in `/local-review` uses it too):
+pass in `/start-review` uses it too):
 
 ```text
 Output only a fenced ```json array. Each finding:
@@ -178,7 +178,7 @@ instead of asking in the terminal, then stop:
   <end_line, or line when absent>, "author": "team", "body": <markdown> }`.
 - `body` starts `"[<category>] (team, flagged by <names>: <rule>)\n\n<body>"`. When the
   finding has a `suggestion`, append a suggestion block (the extension's format;
-  `/apply-review` applies it verbatim), with one `- ` line per line of `before` and
+  `/address-review` applies it verbatim), with one `- ` line per line of `before` and
   one `+ ` line per line of `after`:
   ````
   💡 **Suggestion:**
@@ -190,8 +190,8 @@ instead of asking in the terminal, then stop:
   ````
   Copy `before` unchanged so the verbatim edit matches.
 - Post: `printf '%s' "$FINDINGS_JSON" | python3 ~/.claude/scripts/local-review-post.py post`
-- Tell the user: "Posted N findings to Local PR Review — run **Local PR Review:
-  Refresh**, review/edit/resolve, then `/apply-review`." **Then stop** — do not run
+- Tell the user: "Posted N findings to Local Review — run **Local Review:
+  Refresh**, go through To do, then `/address-review`." **Then stop** — do not run
   the terminal flow (steps 7–8) or any `AskUserQuestion`.
 
 **Else → terminal mode** (steps 6–8 below).

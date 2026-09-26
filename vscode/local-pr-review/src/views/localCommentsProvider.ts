@@ -1,48 +1,22 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import { StorageService } from '../storage/storageService';
-import { ReviewThread } from '../types';
+import { ReviewThread, ThreadStage } from '../types';
 import { isOwnAuthor, isOwnThread } from '../identity';
+import { stageOf, stageTag, STAGE_LABEL } from '../stage';
 
-/**
- * How a thread relates to you, which drives its icon and sort position:
- *  - 'needsOk'   someone else's comment (team/codex/GitHub), unresolved and not
- *                yet queued — awaiting your "Queue for apply". Sorted FIRST.
- *  - 'accepted'  someone else's comment you queued for apply — queued.
- *  - 'mine'      a comment you wrote (locally, or on the PR under your GitHub login).
- *  - 'muted'     someone else's comment you skipped-always — parked, out of triage.
- *  - 'resolved'  resolved — sorted last.
- */
-type Category = 'needsOk' | 'accepted' | 'applied' | 'mine' | 'muted' | 'resolved';
-
-/** The collapsible category groups, in display order. The "done" groups (muted,
- *  resolved) start collapsed so they're hidden until you want them; empty groups
- *  are omitted. Several categories fold into "Yours" so active work isn't
- *  fragmented across near-empty headers. */
-interface GroupDef { key: string; label: string; cats: Category[]; expanded: boolean; }
-const GROUPS: GroupDef[] = [
-    { key: 'needsOk', label: 'Needs your OK', cats: ['needsOk'], expanded: true },
-    { key: 'yours', label: 'Yours', cats: ['mine', 'accepted', 'applied'], expanded: true },
-    { key: 'muted', label: 'Muted', cats: ['muted'], expanded: false },
-    { key: 'resolved', label: 'Resolved', cats: ['resolved'], expanded: false },
+/** The stage groups, in display order. Later and Closed hold nothing that needs
+ *  you now, so they start collapsed; empty groups are omitted. */
+const GROUPS: { stage: ThreadStage; expanded: boolean }[] = [
+    { stage: 'todo', expanded: true },
+    { stage: 'claude', expanded: true },
+    { stage: 'later', expanded: false },
+    { stage: 'closed', expanded: false },
 ];
-const CAT_TO_GROUP = Object.fromEntries(
-    GROUPS.flatMap(g => g.cats.map(c => [c, g.key]))
-) as Record<Category, string>;
-
-function categorize(thread: ReviewThread, ownUser: string, viewerLogin?: string): Category {
-    if (thread.state === 'resolved') { return 'resolved'; }
-    // Mute wins over ownership/applied, so muting a "yours" (or applied) thread
-    // actually moves it into Muted — the navigator's Mute button relies on this.
-    if (thread.disposition === 'dismissed') { return 'muted'; }
-    if (isOwnThread(thread, ownUser, viewerLogin)) { return 'mine'; }
-    if (thread.applied) { return 'applied'; }
-    return thread.disposition === 'accepted' ? 'accepted' : 'needsOk';
-}
 
 /**
  * Navigator over the active review's comment threads: one row per thread
- * (`file:line — snippet`), click to jump to the comment's location.
+ * (`file:line — snippet`), grouped by stage, click to jump to the comment's location.
  */
 export class LocalCommentsProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<vscode.TreeItem | undefined>();
@@ -64,30 +38,26 @@ export class LocalCommentsProvider implements vscode.TreeDataProvider<vscode.Tre
             return [];
         }
         const ownUser = os.userInfo().username;
-        const viewerLogin = comments.viewerLogin;
 
         // Bucket threads into groups, each kept in file→line order (same as Changed
         // Files). Iterating the pre-sorted list keeps every bucket sorted.
-        const byGroup = new Map<string, CommentNavItem[]>();
-        const sorted = [...comments.threads]
-            .map(t => ({ t, cat: categorize(t, ownUser, viewerLogin) }))
-            .sort((a, b) =>
-                a.t.filePath.localeCompare(b.t.filePath) || a.t.startLine - b.t.startLine);
-        for (const { t, cat } of sorted) {
+        const byStage = new Map<ThreadStage, CommentNavItem[]>();
+        const sorted = [...comments.threads].sort((a, b) =>
+            a.filePath.localeCompare(b.filePath) || a.startLine - b.startLine);
+        for (const t of sorted) {
+            const stage = stageOf(t);
             const item = new CommentNavItem(
-                t, cat, ownUser, this.storageService.outdatedThreadIds.has(t.id), viewerLogin);
-            const gk = CAT_TO_GROUP[cat];
-            (byGroup.get(gk) ?? byGroup.set(gk, []).get(gk)!).push(item);
+                t, ownUser, this.storageService.outdatedThreadIds.has(t.id));
+            (byStage.get(stage) ?? byStage.set(stage, []).get(stage)!).push(item);
         }
 
-        // Pinned triage launcher on top (always visible, not hover-gated), then the
-        // non-empty groups in display order.
-        const needsOkCount = (byGroup.get('needsOk') ?? []).length;
-        const out: vscode.TreeItem[] = [new TriageHeaderItem(needsOkCount)];
+        // Pinned step-through launcher on top (always visible, not hover-gated),
+        // then the non-empty groups in display order.
+        const out: vscode.TreeItem[] = [new StepThroughHeaderItem((byStage.get('todo') ?? []).length)];
         for (const g of GROUPS) {
-            const children = byGroup.get(g.key);
+            const children = byStage.get(g.stage);
             if (!children || children.length === 0) { continue; }
-            out.push(new CommentGroupItem(g.label, g.key, children, g.expanded));
+            out.push(new CommentGroupItem(g.stage, children, g.expanded));
         }
         return out;
     }
@@ -101,49 +71,41 @@ export class LocalCommentsProvider implements vscode.TreeDataProvider<vscode.Tre
     }
 }
 
-const ICONS: Record<Category, vscode.ThemeIcon> = {
-    // Someone else's, awaiting you — amber person to stand out.
-    needsOk: new vscode.ThemeIcon('person', new vscode.ThemeColor('localPrReview.unresolvedCommentForeground')),
-    // You queued it — green rocket, echoing the "Queue for apply" action.
-    accepted: new vscode.ThemeIcon('rocket', new vscode.ThemeColor('charts.green')),
-    // The change was made; left for you to verify + resolve.
-    applied: new vscode.ThemeIcon('pass', new vscode.ThemeColor('charts.blue')),
-    // Your own note.
-    mine: new vscode.ThemeIcon('comment'),
-    // Skipped-always — parked, out of triage. Dimmed bell-slash.
-    muted: new vscode.ThemeIcon('bell-slash', new vscode.ThemeColor('descriptionForeground')),
-    // Done — dimmed check.
-    resolved: new vscode.ThemeIcon('check', new vscode.ThemeColor('descriptionForeground')),
+const dim = new vscode.ThemeColor('descriptionForeground');
+
+const STAGE_ICONS: Record<ThreadStage, vscode.ThemeIcon> = {
+    // Your move — amber to stand out.
+    todo: new vscode.ThemeIcon('person', new vscode.ThemeColor('localPrReview.unresolvedCommentForeground')),
+    claude: new vscode.ThemeIcon('sparkle'),
+    later: new vscode.ThemeIcon('watch', dim),
+    closed: new vscode.ThemeIcon('archive', dim),
 };
 
-const GROUP_ICONS: Record<string, vscode.ThemeIcon> = {
-    needsOk: new vscode.ThemeIcon('person', new vscode.ThemeColor('localPrReview.unresolvedCommentForeground')),
-    yours: new vscode.ThemeIcon('comment'),
-    muted: new vscode.ThemeIcon('bell-slash', new vscode.ThemeColor('descriptionForeground')),
-    resolved: new vscode.ThemeIcon('check', new vscode.ThemeColor('descriptionForeground')),
-};
+/** A closed row shows how it ended, with the icon of the action that closed it. */
+function rowIcon(thread: ReviewThread): vscode.ThemeIcon {
+    const stage = stageOf(thread);
+    if (stage !== 'closed') { return STAGE_ICONS[stage]; }
+    return new vscode.ThemeIcon(thread.applied ? 'tools' : 'trash', dim);
+}
 
-const STATUS_NOTE: Record<Category, string> = {
-    needsOk: '  _(needs your OK — “Queue for apply” on the comment, or run Triage)_',
-    accepted: '  _(queued for /apply-review)_',
-    applied: '  _(applied — verify, then resolve to close it on GitHub)_',
-    mine: '',
-    muted: '  _(skipped always — out of triage; untouched on GitHub. Restore on the comment)_',
-    resolved: '  _(resolved)_',
+const STATUS_NOTE: Record<ThreadStage, string> = {
+    todo: '  _(to do — your move)_',
+    claude: '  _(with Claude — the next /address-review acts on it)_',
+    later: '  _(later — back in To do after the next /address-review)_',
+    closed: '  _(closed)_',
 };
 
 export class CommentNavItem extends vscode.TreeItem {
-    // Exposed so the navigator's Resolve/Reply/Unresolve commands can act by id —
-    // they work even for a thread with no live inline instance (code committed away).
+    // Exposed so the navigator's row actions can act by id — they work even for a
+    // thread with no live inline instance (code committed away).
     readonly threadId: string;
-    readonly isGithub: boolean;
 
-    constructor(thread: ReviewThread, category: Category, ownUser: string, outdated = false, viewerLogin?: string) {
+    constructor(thread: ReviewThread, ownUser: string, outdated = false) {
         const base = thread.filePath.substring(thread.filePath.lastIndexOf('/') + 1);
         // Stored lines are 0-based (VS Code Range); show 1-based to the user.
         super(`${base}:${thread.startLine + 1}`, vscode.TreeItemCollapsibleState.None);
         this.threadId = thread.id;
-        this.isGithub = !!thread.github;
+        const stage = stageOf(thread);
 
         const author = thread.comments[0]?.author ?? '';
         const snippet = (thread.comments[0]?.body ?? '')
@@ -152,22 +114,26 @@ export class CommentNavItem extends vscode.TreeItem {
             .slice(0, 80);
         const replies = thread.comments.length > 1 ? ` +${thread.comments.length - 1}` : '';
         // Prefix the author for others' comments so "someone else's" reads at a glance.
-        const who = category === 'mine' ? '' : `${author}: `;
-        // Lead with the outdated marker rather than trailing it: the description
-        // truncates from the right, so a trailing "· outdated" was the first thing
-        // cut off on a normal-width row. As a prefix it's always visible.
-        const prefix = outdated && category !== 'resolved' ? 'outdated · ' : '';
+        const who = isOwnThread(thread, ownUser) ? '' : `${author}: `;
+        // Lead with the tag and the outdated marker rather than trailing them: the
+        // description truncates from the right, so trailing markers are the first
+        // thing cut off on a normal-width row.
+        const prefix = (outdated && stage !== 'closed' ? 'outdated · ' : '') + `${stageTag(thread)} · `;
         this.description = prefix + who + snippet + replies;
 
         const tip = new vscode.MarkdownString(
             `**${thread.filePath}:${thread.startLine + 1}**` +
-            STATUS_NOTE[category] + '\n\n' +
-            thread.comments.map(c => `**${isOwnAuthor(c.author, ownUser, viewerLogin) ? 'you' : c.author}:** ${c.body}`).join('\n\n')
+            STATUS_NOTE[stage] + '\n\n' +
+            thread.comments.map(c => `**${isOwnAuthor(c.author, ownUser) ? 'you' : c.author}:** ${c.body}`).join('\n\n')
         );
         this.tooltip = tip;
 
-        this.iconPath = ICONS[category];
-        this.contextValue = `commentNav.${category}`;
+        this.iconPath = rowIcon(thread);
+        // Same tokens as the inline thread's contextValue, so rows offer the same
+        // actions as the thread's header.
+        this.contextValue = 'commentNav.' + (stage === 'claude' && thread.request
+            ? `${stage}.${thread.request}`
+            : stage);
 
         // Open the comment in the diff for the current review mode (whole-branch or
         // uncommitted), not the bare file — so it's shown in context with the change.
@@ -187,47 +153,45 @@ export class CommentNavItem extends vscode.TreeItem {
 }
 
 /**
- * A collapsible category header grouping its threads, with the count in the
+ * A collapsible stage header grouping its threads, with the count in the
  * description. The stable `id` makes VS Code persist your expand/collapse across
- * refreshes — so the collapsed Muted/Resolved groups don't pop back open, and one
+ * refreshes — so the collapsed Later/Closed groups don't pop back open, and one
  * you've expanded isn't forced shut on the next comment change.
  */
 export class CommentGroupItem extends vscode.TreeItem {
     constructor(
-        label: string,
-        key: string,
+        stage: ThreadStage,
         public readonly children: CommentNavItem[],
         expanded: boolean
     ) {
-        super(label, expanded
+        super(STAGE_LABEL[stage], expanded
             ? vscode.TreeItemCollapsibleState.Expanded
             : vscode.TreeItemCollapsibleState.Collapsed);
-        this.id = `commentGroup.${key}`;
+        this.id = `commentGroup.${stage}`;
         this.description = `${children.length}`;
-        this.contextValue = `commentGroup.${key}`;
-        this.iconPath = GROUP_ICONS[key];
+        this.contextValue = `commentGroup.${stage}`;
+        this.iconPath = STAGE_ICONS[stage];
     }
 }
 
 /**
- * Always-visible top row of the Comments view that acts as the Triage button.
- * When threads await your OK it's actionable (amber checklist + count, click →
- * picker); otherwise it's a quiet "all triaged" status line.
+ * Always-visible top row of the Comments view that starts the step-through walk.
+ * When threads are To do it's actionable (amber checklist + count, click →
+ * picker); otherwise it's a quiet "nothing to do" status line.
  */
-export class TriageHeaderItem extends vscode.TreeItem {
-    constructor(needsOkCount: number) {
-        super(needsOkCount > 0 ? 'Triage' : 'All triaged', vscode.TreeItemCollapsibleState.None);
-        if (needsOkCount > 0) {
-            this.description = `${needsOkCount} need${needsOkCount === 1 ? 's' : ''} your OK`;
+export class StepThroughHeaderItem extends vscode.TreeItem {
+    constructor(todoCount: number) {
+        super(todoCount > 0 ? 'Step through' : 'Nothing to do', vscode.TreeItemCollapsibleState.None);
+        if (todoCount > 0) {
+            this.description = `${todoCount} to do`;
             this.iconPath = new vscode.ThemeIcon(
                 'checklist', new vscode.ThemeColor('localPrReview.unresolvedCommentForeground'));
-            this.command = { command: 'localPrReview.triage', title: 'Triage review comments' };
-            this.tooltip = 'Start triage — step through each comment awaiting your OK';
+            this.command = { command: 'localPrReview.stepThrough', title: 'Step through To do' };
+            this.tooltip = 'Go through the To do threads one at a time';
         } else {
-            this.description = 'nothing waiting';
-            this.iconPath = new vscode.ThemeIcon('check', new vscode.ThemeColor('descriptionForeground'));
-            this.tooltip = 'No comments are waiting for your OK';
+            this.iconPath = new vscode.ThemeIcon('check', dim);
+            this.tooltip = 'No threads are waiting for you';
         }
-        this.contextValue = 'commentNav.triageHeader';
+        this.contextValue = 'commentNav.stepThroughHeader';
     }
 }

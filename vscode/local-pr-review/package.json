@@ -52,7 +52,7 @@
     "colors": [
       {
         "id": "localPrReview.unresolvedCommentForeground",
-        "description": "Color for files with unresolved review comments",
+        "description": "Color for files with review comments to do",
         "defaults": {
           "dark": "#e2c08d",
           "light": "#b58900",
@@ -76,13 +76,15 @@
               "type": "string",
               "description": "Optional workspace-relative file path to filter comments for a specific file. Example: 'src/main.py'"
             },
-            "state": {
+            "stage": {
               "type": "string",
               "enum": [
-                "resolved",
-                "unresolved"
+                "todo",
+                "claude",
+                "later",
+                "closed"
               ],
-              "description": "Optional filter by comment state: 'resolved' or 'unresolved'. Omit to get all comments."
+              "description": "Optional filter by stage: 'todo' (the user's move), 'claude' (waiting for /address-review), 'later' (set aside), 'closed' (finished). Omit to get all comments."
             }
           }
         }
@@ -149,43 +151,38 @@
         "icon": "$(git-branch)"
       },
       {
-        "command": "localPrReview.resolveThread",
-        "title": "Resolve",
-        "icon": "$(check)"
-      },
-      {
-        "command": "localPrReview.unresolveThread",
-        "title": "Unresolve",
-        "icon": "$(issue-reopened)"
-      },
-      {
-        "command": "localPrReview.acceptThread",
-        "title": "Queue for apply",
+        "command": "localPrReview.applyAndClose",
+        "title": "Apply & close: Claude makes the change on the next /address-review, then closes the thread",
         "icon": "$(rocket)"
       },
       {
-        "command": "localPrReview.dismissThread",
-        "title": "Ignore",
-        "icon": "$(circle-slash)"
+        "command": "localPrReview.apply",
+        "title": "Apply: Claude makes the change on the next /address-review, then sends the thread back to you to check",
+        "icon": "$(tools)"
       },
       {
-        "command": "localPrReview.unacceptThread",
-        "title": "Undo queue",
+        "command": "localPrReview.later",
+        "title": "Later: set aside until the next /address-review",
+        "icon": "$(watch)"
+      },
+      {
+        "command": "localPrReview.discard",
+        "title": "Discard: remove it from the review; nothing more happens with it",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "localPrReview.undo",
+        "title": "Undo: take it back from Claude and return it to To do",
         "icon": "$(discard)"
       },
       {
-        "command": "localPrReview.skipAlways",
-        "title": "Skip always (mute)",
-        "icon": "$(bell-slash)"
+        "command": "localPrReview.reopen",
+        "title": "Reopen: move it back to To do",
+        "icon": "$(issue-reopened)"
       },
       {
-        "command": "localPrReview.restoreThread",
-        "title": "Restore",
-        "icon": "$(bell)"
-      },
-      {
-        "command": "localPrReview.triage",
-        "title": "Triage review comments",
+        "command": "localPrReview.stepThrough",
+        "title": "Step through To do",
         "icon": "$(checklist)"
       },
       {
@@ -204,15 +201,15 @@
       {
         "command": "localPrReview.deleteComment",
         "title": "Delete",
-        "icon": "$(trash)"
+        "icon": "$(close)"
       },
       {
         "command": "localPrReview.addComment",
-        "title": "Comment"
+        "title": "Send to Claude"
       },
       {
         "command": "localPrReview.saveComment",
-        "title": "Comment"
+        "title": "Send to Claude"
       },
       {
         "command": "localPrReview.cancelComment",
@@ -269,34 +266,9 @@
         "icon": "$(check)"
       },
       {
-        "command": "localPrReview.reviewComments",
-        "title": "Review comments",
-        "icon": "$(checklist)"
-      },
-      {
-        "command": "localPrReview.resolveComment",
-        "title": "Resolve",
-        "icon": "$(check)"
-      },
-      {
-        "command": "localPrReview.unresolveComment",
-        "title": "Unresolve",
-        "icon": "$(issue-reopened)"
-      },
-      {
         "command": "localPrReview.replyComment",
-        "title": "Reply",
+        "title": "Reply: tell Claude what you want; it answers on the next /address-review",
         "icon": "$(comment)"
-      },
-      {
-        "command": "localPrReview.muteComment",
-        "title": "Mute",
-        "icon": "$(bell-slash)"
-      },
-      {
-        "command": "localPrReview.unmuteComment",
-        "title": "Restore",
-        "icon": "$(bell)"
       }
     ],
     "keybindings": [
@@ -357,7 +329,7 @@
           "group": "navigation@3"
         },
         {
-          "command": "localPrReview.reviewComments",
+          "command": "localPrReview.stepThrough",
           "when": "view == localPrReview.localComments",
           "group": "navigation@1"
         },
@@ -389,29 +361,39 @@
           "group": "inline@2"
         },
         {
-          "command": "localPrReview.resolveComment",
-          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.(mine|needsOk|accepted|applied|muted)$/",
+          "command": "localPrReview.applyAndClose",
+          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.(todo|later|claude|claude\\.apply)$/",
+          "group": "inline@0"
+        },
+        {
+          "command": "localPrReview.apply",
+          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.(todo|later|claude|claude\\.apply-close)$/",
           "group": "inline@1"
         },
         {
-          "command": "localPrReview.unresolveComment",
-          "when": "view == localPrReview.localComments && viewItem == commentNav.resolved",
-          "group": "inline@1"
-        },
-        {
-          "command": "localPrReview.replyComment",
-          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.(mine|needsOk|accepted|applied|resolved|muted)$/",
+          "command": "localPrReview.later",
+          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.todo$/",
           "group": "inline@2"
         },
         {
-          "command": "localPrReview.muteComment",
-          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.(needsOk|mine|accepted|applied)$/",
+          "command": "localPrReview.discard",
+          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.(todo|later|claude)/",
           "group": "inline@3"
         },
         {
-          "command": "localPrReview.unmuteComment",
-          "when": "view == localPrReview.localComments && viewItem == commentNav.muted",
+          "command": "localPrReview.undo",
+          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.claude/",
+          "group": "inline@4"
+        },
+        {
+          "command": "localPrReview.reopen",
+          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.closed$/",
           "group": "inline@0"
+        },
+        {
+          "command": "localPrReview.replyComment",
+          "when": "view == localPrReview.localComments && viewItem =~ /^commentNav\\.(todo|later|claude)/",
+          "group": "inline@5"
         }
       ],
       "comments/commentThread/context": [
@@ -428,7 +410,7 @@
         {
           "command": "localPrReview.suggestChange",
           "group": "inline@2",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved/"
+          "when": "commentController == localPrReview && commentThread =~ /^(todo|later|claude)/"
         },
         {
           "command": "localPrReview.cancelComment",
@@ -462,49 +444,72 @@
       ],
       "comments/commentThread/title": [
         {
-          "command": "localPrReview.acceptThread",
+          "command": "localPrReview.applyAndClose",
           "group": "inline@0",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved\\.proposable/"
+          "when": "commentController == localPrReview && commentThread =~ /^(todo|later|claude|claude\\.apply)$/"
         },
         {
-          "command": "localPrReview.dismissThread",
+          "command": "localPrReview.apply",
           "group": "inline@1",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved\\.proposable$/"
+          "when": "commentController == localPrReview && commentThread =~ /^(todo|later|claude|claude\\.apply-close)$/"
         },
         {
-          "command": "localPrReview.skipAlways",
+          "command": "localPrReview.later",
           "group": "inline@2",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved\\.proposable/"
+          "when": "commentController == localPrReview && commentThread =~ /^todo$/"
         },
         {
-          "command": "localPrReview.restoreThread",
-          "group": "inline@0",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved\\.dismissed/"
-        },
-        {
-          "command": "localPrReview.resolveThread",
+          "command": "localPrReview.discard",
           "group": "inline@3",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved.*\\.github/"
+          "when": "commentController == localPrReview && commentThread =~ /^(todo|later|claude)/"
         },
         {
-          "command": "localPrReview.resolveThread",
-          "group": "inline@1",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved$/"
+          "command": "localPrReview.undo",
+          "group": "inline@4",
+          "when": "commentController == localPrReview && commentThread =~ /^claude/"
         },
         {
-          "command": "localPrReview.resolveThread",
-          "group": "inline@1",
-          "when": "commentController == localPrReview && commentThread =~ /^unresolved\\.accepted$/"
-        },
-        {
-          "command": "localPrReview.unacceptThread",
+          "command": "localPrReview.reopen",
           "group": "inline@0",
-          "when": "commentController == localPrReview && commentThread =~ /\\.accepted/"
+          "when": "commentController == localPrReview && commentThread =~ /^closed$/"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "localPrReview.applyAndClose",
+          "when": "false"
         },
         {
-          "command": "localPrReview.unresolveThread",
-          "group": "inline@1",
-          "when": "commentController == localPrReview && commentThread =~ /^resolved/"
+          "command": "localPrReview.apply",
+          "when": "false"
+        },
+        {
+          "command": "localPrReview.later",
+          "when": "false"
+        },
+        {
+          "command": "localPrReview.discard",
+          "when": "false"
+        },
+        {
+          "command": "localPrReview.undo",
+          "when": "false"
+        },
+        {
+          "command": "localPrReview.reopen",
+          "when": "false"
+        },
+        {
+          "command": "localPrReview.replyComment",
+          "when": "false"
+        },
+        {
+          "command": "localPrReview.addComment",
+          "when": "false"
+        },
+        {
+          "command": "localPrReview.saveComment",
+          "when": "false"
         }
       ]
     }

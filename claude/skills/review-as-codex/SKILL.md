@@ -182,7 +182,7 @@ python3 ~/.claude/scripts/local-review-post.py status
   `{ "file", "line", "endLine": <end_line, or line when null>, "author": "codex", "body" }`.
   `body` = `"[<severity>] (codex)\n\n<body>"`,
   plus — when the finding has a `suggestion` `{before, after}` — a verbatim-applicable block
-  (`/apply-review` applies it as-is):
+  (`/address-review` applies it as-is):
   ````
   💡 **Suggestion:**
 
@@ -193,8 +193,8 @@ python3 ~/.claude/scripts/local-review-post.py status
   ````
 - Discard a finding only if it is clearly invalid after checking the file.
 - Post: `printf '%s' "$FINDINGS_JSON" | python3 ~/.claude/scripts/local-review-post.py post`
-- Tell the user: "Posted N Codex findings to Local PR Review — run **Local PR Review:
-  Refresh**, review/edit/resolve, then `/apply-review`."
+- Tell the user: "Posted N Codex findings to Local Review — run **Local Review:
+  Refresh**, go through To do, then `/address-review`."
 
 **Else** (no active review): present Codex findings without rewriting their substance,
 discard only what's clearly invalid, and ask whether to apply fixes. Claude implements

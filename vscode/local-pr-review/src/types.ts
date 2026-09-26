@@ -50,34 +50,42 @@ export interface FileChange {
 
 export type FileChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 
+/**
+ * Where a thread is in the review loop:
+ *  - 'todo'   your move: a new finding, or Claude handled it and it's back to you.
+ *  - 'claude' you handed it to Claude; the next /address-review acts on it.
+ *  - 'later'  set aside until the next /address-review, which returns it to 'todo'.
+ *  - 'closed' finished; nothing more happens with it.
+ */
+export type ThreadStage = 'todo' | 'claude' | 'later' | 'closed';
+
+/** 'apply' = make the change, then back to you; 'apply-close' = make it and close. */
+export type ApplyRequest = 'apply' | 'apply-close';
+
 export interface ReviewThread {
     id: string;
     filePath: string;
     startLine: number;
     endLine: number;
-    state: 'resolved' | 'unresolved';
+    // Where the thread is in the review loop. Threads saved before stages existed
+    // carry only `state` instead.
+    stage?: ThreadStage;
+    state?: 'resolved' | 'unresolved';
+    // For a 'claude' thread, whether Claude should also make the change the thread
+    // asks for, and whether the thread then closes or comes back to you.
+    request?: ApplyRequest;
     comments: ReviewComment[];
     // Which side the comment was added on: the working file (after/right side) vs
     // a git ref (before/left side). Drives where it's re-materialized so a comment
     // doesn't get a twin on the opposite diff side. Absent (legacy) ⇒ working tree.
     onWorkingTree?: boolean;
-    // The user's triage of a thread they didn't author (team/codex/GitHub). Only
-    // such "proposable" threads carry it. 'accepted' = "queue for apply": approved
-    // to be applied. 'dismissed' = "skip always" — muted: it leaves the
-    // triage queue + needs-OK count but stays UNRESOLVED and untouched on GitHub (for
-    // a note you keep open for reviewers). Your own comments need no disposition.
-    disposition?: 'accepted' | 'dismissed';
-    // Set once the change a not-yours thread asks for has been made; the thread
-    // stays UNRESOLVED so you verify + resolve it yourself. Prevents re-applying.
+    // Whether Claude changed code the last time it handled the thread.
     applied?: boolean;
-    // Present on threads imported from a GitHub PR — the identity used to update the
-    // thread in place when the PR is imported again.
-    github?: GithubRef;
-    // The code this comment was written against. Captured only when we KNOW it: at
-    // local create-time (from the editor), or from a GitHub comment's diff_hunk. We
-    // never guess it from the current file. When the current block no longer matches
-    // `code`, the thread is "outdated" and we surface `code` so the comment stays
-    // linked to what it was actually about. Working-tree threads only.
+    // The code this comment was written against. Captured only when we KNOW it: when
+    // the comment is created. We never guess it later from the current file. When
+    // the current block no longer matches `code`, the thread is "outdated" and we
+    // surface `code` so the comment stays linked to what it was actually about.
+    // Working-tree threads only.
     anchor?: { code: string };
     // Set when we auto-moved an after-side comment to the before side because its
     // code was DELETED from the working tree (so it shows on the removed/red lines
@@ -87,26 +95,11 @@ export interface ReviewThread {
     autoBefore?: boolean;
 }
 
-export interface GithubRef {
-    repo: string;       // "owner/name"
-    prNumber: number;
-    commentId: number;  // REST databaseId of the head comment — joins to the GraphQL thread
-}
-
 export interface ReviewComment {
     id: string;
     body: string;
     author: string;
     timestamp: string;
-    // For comments imported from GitHub: the reviewer's avatar URL, downloaded and
-    // cached locally so the thread shows their real picture instead of an initial.
-    avatarUrl?: string;
-    // Which conversation channel this comment belongs to:
-    //   'github' — imported from the PR conversation; read-only here.
-    //   'local'  — never leaves this machine: your notes and replies from review
-    //              tools, even on a GitHub thread.
-    // Absent (legacy) is inferred at render from the thread + author.
-    channel?: 'github' | 'local';
 }
 
 export interface CommentsFile {
@@ -116,10 +109,6 @@ export interface CommentsFile {
     sourceCommit: string;
     targetCommit: string;
     threads: ReviewThread[];
-    // Your GitHub login, recorded when a PR's comments are imported. Comments authored under it
-    // are treated as yours (so a note you left on your own PR isn't mis-filed as a
-    // reviewer's comment awaiting your OK). Absent until a PR has been loaded.
-    viewerLogin?: string;
 }
 
 export interface LocalPrRegistry {
@@ -128,7 +117,7 @@ export interface LocalPrRegistry {
     activeReviewId?: string;
     // One-time flag: v0.3.17 backfilled comment anchors by GUESSING from the
     // current file, which produced wrong "original code". v0.3.18 purges those once
-    // (anchors are re-derived correctly from create-time / GitHub diff_hunk).
+    // (anchors are re-derived correctly from create-time).
     anchorsReset?: boolean;
 }
 

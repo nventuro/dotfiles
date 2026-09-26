@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { StorageService } from '../storage/storageService';
+import { stageOf } from '../stage';
 
 export class ReviewFileDecorationProvider implements vscode.FileDecorationProvider {
     private _onDidChangeFileDecorations = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
@@ -32,31 +33,29 @@ export class ReviewFileDecorationProvider implements vscode.FileDecorationProvid
         // Only the comment-count badge. The git status letter (M/A/D/U) + colour
         // come from VS Code's built-in Git decoration provider for free — adding
         // our own duplicated it (rendered as "M,M").
-        const count = this.getUnresolvedCount(relativePath);
+        const count = this.getTodoCount(relativePath);
         if (count === 0) {
             return undefined;
         }
 
         return {
             badge: `${count}`,
-            tooltip: `${count} unresolved review comment${count > 1 ? 's' : ''}`,
+            tooltip: `${count} review comment${count > 1 ? 's' : ''} to do`,
             color: new vscode.ThemeColor('localPrReview.unresolvedCommentForeground'),
             propagate: true,
         };
     }
 
-    private getUnresolvedCount(filePath: string): number {
+    private getTodoCount(filePath: string): number {
         const comments = this.storageService.loadComments();
         if (!comments) {
             return 0;
         }
 
-        // Muted ("skip always", dismissed) threads stay unresolved but are off your
-        // plate, so they're excluded from the badge — matching the Changed Files
-        // per-file counter.
+        // Only To do threads: the badge marks files where something needs you,
+        // matching the Changed Files per-file counter.
         return comments.threads.filter(
-            t => t.filePath === filePath && t.state === 'unresolved'
-                && t.disposition !== 'dismissed'
+            t => t.filePath === filePath && stageOf(t) === 'todo'
         ).length;
     }
 

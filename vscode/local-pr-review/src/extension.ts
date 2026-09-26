@@ -14,7 +14,8 @@ import {
   CommentNavItem,
 } from "./views/localCommentsProvider";
 import { ReviewCommentController } from "./comments/commentController";
-import { runTriage, runReview } from "./triage/triageController";
+import { runStepThrough } from "./triage/triageController";
+import { ApplyRequest, ThreadStage } from "./types";
 import * as os from "os";
 import { LocalReviewTool } from "./tools/localReviewTool";
 import { ReviewFileDecorationProvider } from "./decorations/fileDecorationProvider";
@@ -106,7 +107,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.globalStorageUri,
   );
 
-  // Initialize file decoration provider (shows unresolved comment badges in explorer)
+  // Initialize file decoration provider (shows to-do comment badges in explorer)
   const fileDecorationProvider = new ReviewFileDecorationProvider(
     storageService,
   );
@@ -493,7 +494,6 @@ export async function activate(context: vscode.ExtensionContext) {
         loadedReviewId = active.id;
         await changedFilesProvider.refresh();
         syncReviewableFiles();
-        // loadAllThreads preloads avatars internally before building threads.
         await commentController.loadAllThreads(
           gitService,
           active.sourceBranch,
@@ -503,8 +503,6 @@ export async function activate(context: vscode.ExtensionContext) {
         fileDecorationProvider.refresh();
         return;
       }
-      // Pull down any GitHub avatars an external write just referenced, so they're cached before the threads re-render.
-      await commentController.preloadAvatars();
       // Update every open thread instance in place (keeps both diff sides,
       // incl. a staged diff's index side, without dispose/recreate).
       commentController.refreshThreadComments();
@@ -513,7 +511,9 @@ export async function activate(context: vscode.ExtensionContext) {
       // `applied` — re-check drift so threads flip to Outdated + show the original.
       await refreshOutdated();
       fileDecorationProvider.refresh();
-      changedFilesProvider.fireChange();
+      // Re-read the Reviewed marks too: starting a fresh review clears them in
+      // registry.json, and the files view holds its own copy.
+      await changedFilesProvider.refresh();
       gitFileContentProvider.refresh();
     }, 300);
   };
@@ -986,141 +986,43 @@ export async function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.resolveThread",
-      (thread: vscode.CommentThread) => {
-        if (thread.state === vscode.CommentThreadState.Unresolved) {
-          commentController.resolveThread(thread);
-        } else {
-          commentController.unresolveThread(thread);
-        }
-        localCommentsProvider.refresh();
-        fileDecorationProvider.refresh();
-        changedFilesProvider.fireChange();
-      },
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.unresolveThread",
-      (thread: vscode.CommentThread) => {
-        commentController.unresolveThread(thread);
-        localCommentsProvider.refresh();
-        fileDecorationProvider.refresh();
-        changedFilesProvider.fireChange();
-      },
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.acceptThread",
-      (thread: vscode.CommentThread) => {
-        commentController.acceptThread(thread);
-        localCommentsProvider.refresh();
-        changedFilesProvider.fireChange();
-      },
-    ),
-  );
-
-  // "Ignore" a proposal: leave a "skipping this" note and resolve it (collapses +
-  // excluded from applying). A distinct verb+icon from your own "Resolve".
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.dismissThread",
-      (thread: vscode.CommentThread) => {
-        commentController.ignoreThread(thread);
-        localCommentsProvider.refresh();
-        fileDecorationProvider.refresh();
-        changedFilesProvider.fireChange();
-      },
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.unacceptThread",
-      (thread: vscode.CommentThread) => {
-        commentController.unacceptThread(thread);
-        localCommentsProvider.refresh();
-        changedFilesProvider.fireChange();
-      },
-    ),
-  );
-
-  // "Skip always" — mute a not-your-own thread: it leaves the triage queue + the
-  // needs-OK count but stays unresolved and untouched on GitHub (e.g. a note you
-  // left for reviewers). "Restore" un-mutes it back to the queue.
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.skipAlways",
-      (thread: vscode.CommentThread) => {
-        commentController.muteThread(thread);
-        localCommentsProvider.refresh();
-        fileDecorationProvider.refresh();
-        changedFilesProvider.fireChange();
-      },
-    ),
-    vscode.commands.registerCommand(
-      "localPrReview.restoreThread",
-      (thread: vscode.CommentThread) => {
-        commentController.unmuteThread(thread);
-        localCommentsProvider.refresh();
-        fileDecorationProvider.refresh();
-        changedFilesProvider.fireChange();
-      },
-    ),
-  );
-
-  // Picker-primary triage: walk the "needs your OK" queue one finding at a time.
-  context.subscriptions.push(
-    vscode.commands.registerCommand("localPrReview.triage", async () => {
-      const refreshViews = () => {
-        localCommentsProvider.refresh();
-        fileDecorationProvider.refresh();
-        changedFilesProvider.fireChange();
-      };
-      await runTriage(
-        storageService,
-        commentController,
-        refreshViews,
-        os.userInfo().username,
-      );
-    }),
-  );
-
-  // Resolve / Reply / Unresolve directly from the Comments navigator — acts by
-  // thread id, so it reaches a comment that has NO inline widget (its code was
-  // committed/rebased away) and an applied team/codex thread (which otherwise
-  // shows only "Undo queue").
+  // Stage actions, shared by a thread's header buttons (which pass the comment
+  // thread) and the Comments navigator's row buttons (which pass the row), so both
+  // carry the same icon and hover text.
   const refreshNavViews = () => {
     localCommentsProvider.refresh();
     fileDecorationProvider.refresh();
     changedFilesProvider.fireChange();
   };
+  const threadIdOf = (arg: vscode.CommentThread | CommentNavItem) =>
+    arg instanceof CommentNavItem ? arg.threadId : commentController.threadIdOf(arg);
+  const stageActions: [string, ThreadStage, ApplyRequest?][] = [
+    ["localPrReview.applyAndClose", "claude", "apply-close"],
+    ["localPrReview.apply", "claude", "apply"],
+    ["localPrReview.later", "later"],
+    ["localPrReview.discard", "closed"],
+    ["localPrReview.undo", "todo"],
+    ["localPrReview.reopen", "todo"],
+  ];
+  for (const [command, stage, request] of stageActions) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        command,
+        (arg: vscode.CommentThread | CommentNavItem) => {
+          const threadId = threadIdOf(arg);
+          if (!threadId) {
+            return;
+          }
+          commentController.moveThreadById(threadId, stage, request);
+          refreshNavViews();
+        },
+      ),
+    );
+  }
+
+  // Reply from a navigator row, which has no reply box of its own. It reaches a
+  // thread with no inline widget (its code was committed/rebased away).
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.resolveComment",
-      (item: CommentNavItem) => {
-        if (!item?.threadId) {
-          return;
-        }
-        commentController.resolveThreadById(item.threadId);
-        refreshNavViews();
-      },
-    ),
-    vscode.commands.registerCommand(
-      "localPrReview.unresolveComment",
-      (item: CommentNavItem) => {
-        if (!item?.threadId) {
-          return;
-        }
-        commentController.unresolveThreadById(item.threadId);
-        refreshNavViews();
-      },
-    ),
     vscode.commands.registerCommand(
       "localPrReview.replyComment",
       async (item: CommentNavItem) => {
@@ -1128,8 +1030,8 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         const text = await vscode.window.showInputBox({
-          prompt: "Reply — private to you + Claude, never posted to GitHub",
-          placeHolder: "e.g. done, or: actually also rename the helper",
+          prompt: "Reply",
+          placeHolder: "e.g. apply this, but use camelCase",
           ignoreFocusOut: true,
         });
         if (text && text.trim()) {
@@ -1138,43 +1040,18 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       },
     ),
-    vscode.commands.registerCommand(
-      "localPrReview.muteComment",
-      (item: CommentNavItem) => {
-        if (!item?.threadId) {
-          return;
-        }
-        commentController.muteThreadById(item.threadId);
-        refreshNavViews();
-      },
-    ),
-    vscode.commands.registerCommand(
-      "localPrReview.unmuteComment",
-      (item: CommentNavItem) => {
-        if (!item?.threadId) {
-          return;
-        }
-        commentController.unmuteThreadById(item.threadId);
-        refreshNavViews();
-      },
-    ),
   );
 
-  // "Review comments": walk every open comment one at a time (Resolve / Reply /
-  // Skip) — the keyboard navigation for your own + applied threads, distinct from
-  // Triage (which queues not-yours proposals).
+  // Walk the To do threads one at a time.
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "localPrReview.reviewComments",
-      async () => {
-        await runReview(
-          storageService,
-          commentController,
-          refreshNavViews,
-          os.userInfo().username,
-        );
-      },
-    ),
+    vscode.commands.registerCommand("localPrReview.stepThrough", async () => {
+      await runStepThrough(
+        storageService,
+        commentController,
+        refreshNavViews,
+        os.userInfo().username,
+      );
+    }),
   );
 
   context.subscriptions.push(

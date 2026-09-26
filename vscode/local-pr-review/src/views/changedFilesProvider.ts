@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { FileChange, CommitInfo } from "../types";
 import { GitService, DiffHunk } from "../git/gitService";
 import { StorageService } from "../storage/storageService";
+import { stageOf } from "../stage";
 import { LocalPrManager } from "../services/localPrManager";
 
 export type ChangedFileTreeItem =
@@ -187,11 +188,9 @@ export class ChangedFilesProvider
     const comments = this.storageService.loadComments();
     if (comments) {
       for (const thread of comments.threads) {
-        // The per-file badge is an "needs your attention" signal, so it drops
-        // threads that are off your plate: resolved (closed) and muted/"skip
-        // always" (dismissed — a local soft-resolve, left open on GitHub but not
-        // something you'll act on). Queued/applied stay counted (still pending).
-        if (thread.state !== "resolved" && thread.disposition !== "dismissed") {
+        // The per-file badge is a "needs your attention" signal, so it counts
+        // only To do threads.
+        if (stageOf(thread) === "todo") {
           counts.set(thread.filePath, (counts.get(thread.filePath) || 0) + 1);
         }
       }
@@ -792,7 +791,7 @@ export class FileChangeItem extends vscode.TreeItem {
       );
     }
 
-    // Description: unresolved-comment counter FIRST (right after the file
+    // Description: to-do comment counter FIRST (right after the file
     // name, so a long dir path can't push it off-screen), then the dimmed
     // dir path. Counter omitted entirely when the count is 0.
     const countLabel = commentCount > 0 ? `\u{1F4AC} ${commentCount}` : "";
@@ -808,7 +807,7 @@ export class FileChangeItem extends vscode.TreeItem {
       `${fileChange.status}${stageNote}: ${fp}` +
       partialNote +
       (commentCount > 0
-        ? ` — ${commentCount} open comment${commentCount > 1 ? "s" : ""}`
+        ? ` — ${commentCount} comment${commentCount > 1 ? "s" : ""} to do`
         : "");
     // The `.reviewed` suffix tags the Reviewed-section copy so it can carry a
     // "Mark not reviewed" action (the checkbox alone can't reset a partial file —

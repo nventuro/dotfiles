@@ -25,14 +25,16 @@ git clone git@github.com:nventuro/dotfiles.git ~/dotfiles
 
 A review loop that runs before a PR exists. Claude Code and Codex review your
 diff, their findings appear as inline comment threads in VS Code through the
-Local Review extension, you triage them there, and `/apply-review` applies what
-you accepted. The two sides share one JSON file per review under the repo's
+Local Review extension, you decide there what happens to each one, and
+`/address-review` carries it out. The two sides share one JSON file per review under the repo's
 `.vscode/local-reviews/`.
 
-Skills: `/local-review` runs every pass and posts the threads: your own rules,
-your reviewers' learned patterns (`/review-as-team`), and general reviews by a
-fresh Claude agent and by Codex (`/review-as-codex`), both given the same prompt. `/apply-review` applies queued threads and
-answers your replies. `/load-pr-comments` pulls a real PR's review threads in.
+Skills: `/start-review` archives the previous review's threads, then runs every
+pass and posts the new threads: your own rules, your reviewers' learned
+patterns (`/review-as-team`), and general reviews by a fresh Claude agent and
+by Codex (`/review-as-codex`), both given the same prompt. `/address-review`
+acts on the threads you sent to Claude: it applies them and answers your
+replies, then hands each one back to you or closes it.
 `/learn` records one of your own rules; `/learn-from-prs` learns your
 reviewers' patterns, and your own rules from the reviews you left, from merged PRs.
 

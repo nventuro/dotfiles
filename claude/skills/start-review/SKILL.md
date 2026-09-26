@@ -1,14 +1,15 @@
 ---
-name: local-review
-description: Run the full local review battery over current changes — self-review against your own learnings, teammate-pattern review (review-as-team), and independent general reviews by Claude and Codex — posting all findings to the Local PR Review extension for triage with /apply-review. Use when the user says "/local-review" or asks for a full/complete local review before shipping.
+name: start-review
+description: Start a fresh local review of current changes — archive the previous review's threads, then run the full battery (self-review against your own learnings, teammate-pattern review via review-as-team, and independent general reviews by Claude and Codex), posting every finding as a To do thread in the Local Review extension for you to decide on and /address-review to act on. Use when the user says "/start-review" or asks for a full/complete local review before shipping.
 argument-hint: "[PR-number | branch-name | uncommitted]"
 ---
 
-# Local Review
+# Start Review
 
-Four independent passes over one scope. All findings are posted as Local PR
-Review threads (author names below), triaged in VS Code, applied with
-`/apply-review`:
+Starts a fresh review: the previous review's threads are archived, then four
+independent passes run over one scope. All findings are posted as To do threads
+in the Local Review extension (author names below); the user decides in VS Code
+what happens to each, and `/address-review` carries it out:
 
 1. **learnings** — the diff checked against your own standing feedback
    (`~/.claude/local-review/my-learnings.md`, the full file — not the
@@ -27,12 +28,23 @@ agents read them themselves.
   (uncommitted / all unpushed / PR / full branch).
 - Ensure threads have somewhere to land:
   `python3 ~/.claude/scripts/local-review-post.py ensure-review`
+- Check what the previous review left unfinished:
+  `python3 ~/.claude/scripts/local-review-post.py pending`. Each entry is a thread
+  handed to Claude that `/address-review` hasn't handled, or one of the user's
+  own comments that isn't closed.
 - One `AskUserQuestion` combining every question the passes would ask:
+  - Archive anyway (only if `pending` is non-empty): list the pending threads as
+    `filePath:line — note`. Archiving keeps them in the archive but out of the
+    new review; a "no" stops here, so the user can finish them first with
+    `/address-review`.
   - Scope (only if several scopes have content).
   - Model for the learnings, team and claude reviewer agents (review-as-team's
     Fable/Opus/Sonnet/Default options).
   - Team learnings freshness (only if `team-learnings.md` is >30 days old:
     Update via `/learn-from-prs` / Use current).
+- Archive the previous review. This moves every thread to the review's
+  `archive/` directory and clears its Reviewed marks:
+  `python3 ~/.claude/scripts/local-review-post.py archive`
 - Write the diff once, to a fresh file created as in review-as-team step 3, using
   its commands for the chosen scope. That path is `<diff>` below.
 
@@ -110,11 +122,11 @@ review-as-codex step 5 posts Codex's.
 
 ## 6. Summary
 
-Report per-pass finding counts and how many findings Claude and Codex agreed
-on, plus how many `post` skipped as `duplicates`
-(already raised on the same code by an earlier run), and remind: run **Local PR Review: Refresh**,
-triage, then `/apply-review`. A pass returning zero findings is a fine outcome —
-report it, don't force findings.
+Report how many threads the previous review archived (and the archive file),
+per-pass finding counts, and how many findings Claude and Codex agreed on, and
+remind: run **Local Review: Refresh**, go through To do (**Step through** in the
+Comments view), then `/address-review`. A pass returning zero findings is a fine
+outcome — report it, don't force findings.
 
 ## Guidelines
 

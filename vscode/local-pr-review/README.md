@@ -3,8 +3,8 @@
 A VS Code extension for reviewing your own changes locally, as inline comment
 threads on a diff, before they become a pull request. It is the editor half of
 the local review kit in this repository: the Claude Code skills under
-`claude/skills` post their findings into it as threads, you triage them here,
-and `/apply-review` applies the ones you accepted.
+`claude/skills` post their findings into it as threads, you decide here what
+happens to each one, and `/address-review` carries that out.
 
 This is a fork of [Local PR Review](https://github.com/Gururagavendra/vscode-local-pr-reviewer)
 by Gururagavendra (MIT), extended by [@nchamo](https://github.com/nchamo) and
@@ -17,19 +17,26 @@ now maintained here. The original license is retained in `LICENSE`.
   against its base, which is the remote's default branch unless the
   `localPrReview.defaultBase` setting or **Set review base** says otherwise.
 - **Inline threads** on any line of a diff, through VS Code's native comment
-  UI, with reply, edit, delete, resolve, and **Suggest a Change** (a diff block
-  that `/apply-review` applies verbatim).
-- **Triage of threads you did not write.** Threads posted by the review skills
-  (`team`, `codex`, `learnings`) or imported from a GitHub PR land in a
-  *Needs your OK* group. Each offers **Queue for apply**, **Ignore**, and
-  **Skip always**, and a **Triage** command walks the queue one thread at a
-  time. Your own threads need no triage.
-- **Comments navigator** grouping threads by state (mine, needs OK, queued,
-  applied, resolved, muted) with resolve, reply, and mute actions from the tree.
+  UI, with reply, **Suggest a Change** (a diff block that `/address-review`
+  applies verbatim), and edit and delete on your own comments.
+- **Stages.** Every thread is in one of four stages:
+  - *To do*: your move. New findings land here, and so does every thread
+    Claude has handled.
+  - *With Claude*: you replied, or chose Apply or Apply & close; the next
+    `/address-review` acts on it.
+  - *Later*: set aside until the next `/address-review`.
+  - *Closed*: finished; nothing more happens with it.
+
+  A thread's header offers the actions that fit its stage: **Apply & close**,
+  **Apply**, **Later**, **Discard**, **Undo** and **Reopen**. Hovering a button
+  says what it does. Replying, or writing a comment of your own, sends the
+  thread to Claude.
+- **Comments navigator** grouping threads by stage, each row tagged with why
+  it is there (`new`, `Claude replied`, `applied`, …) and offering the same
+  actions. **Step through** walks the To do threads one at a time.
 - **Reviewed tracking** per file and per hunk (`ctrl+shift+r`), keyed on file
   content so a checkbox clears when the file changes.
-- **Identity.** Threads are yours when their first comment is by your OS user
-  or your GitHub login, so notes you left on a PR are not queued for your own OK.
+- **Identity.** Threads are yours when their first comment is by your OS user.
 - **Anchors.** Each thread keeps the code it was written against, so it stays
   attached through line drift and shows when it has gone stale.
 - **Copilot tool.** `#localReviewComments` in Copilot chat reads the threads.
@@ -41,9 +48,12 @@ kit's global git ignore keeps out of commits:
 
 - `registry.json` lists the review sessions and which one is active.
 - `<source>_<target>/comments.json` holds that session's threads. Each thread
-  has a file path, a line range, a state, an optional `disposition`
-  (`accepted` or `dismissed`) and `applied` flag from triage, and its comments,
-  each with an author and a `channel` (`local`, or `github` when imported).
+  has a file path, a line range, a `stage` (`todo`, `claude`, `later` or
+  `closed`), on a With Claude thread an optional `request` (`apply` or
+  `apply-close`), an `applied` flag saying whether Claude changed code the
+  last time it handled the thread, and its comments, each with an author.
+- `<source>_<target>/archive/` holds the threads of earlier reviews of that
+  session, one file per `/start-review`, kept for reading only.
 
 The scripts in `claude/scripts` read and write the same files, which is how
 the skills and the editor stay in sync. Run **Local Review: Refresh** after a
@@ -53,11 +63,7 @@ script has posted.
 
 - Replaced the branch-selector webview with the two review modes above and
   automatic base detection.
-- Added triage: dispositions, the applied flag, the Needs-your-OK queue, the
-  Triage picker, mute, and the canned triage comments the scripts recognize.
-- Added GitHub import support: threads carry their PR comment ids, reviewer
-  avatars, original timestamps, and the `channel` marker.
-- Added identity handling for your own comments imported from a PR.
+- Added the review stages, their thread actions, and the step-through walk.
 - Added anchors and stale detection, plus per-hunk reviewed tracking.
 - Added the comments navigator groups and their inline actions.
 - Removed the marketplace packaging; this fork is built and installed from

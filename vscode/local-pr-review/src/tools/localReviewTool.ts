@@ -2,10 +2,12 @@ import * as vscode from 'vscode';
 import { GitService } from '../git/gitService';
 import { LocalPrManager } from '../services/localPrManager';
 import { StorageService } from '../storage/storageService';
+import { ThreadStage } from '../types';
+import { stageOf } from '../stage';
 
 interface ToolInput {
     filePath?: string;
-    state?: 'resolved' | 'unresolved';
+    stage?: ThreadStage;
 }
 
 export class LocalReviewTool implements vscode.LanguageModelTool<ToolInput> {
@@ -24,7 +26,7 @@ export class LocalReviewTool implements vscode.LanguageModelTool<ToolInput> {
             message: new vscode.MarkdownString(
                 `Retrieve local review comments${
                     options.input.filePath ? ` for **${options.input.filePath}**` : ''
-                }${options.input.state ? ` (${options.input.state} only)` : ''}?`
+                }${options.input.stage ? ` (${options.input.stage} only)` : ''}?`
             ),
         };
         return { invocationMessage: 'Checking local review comments...', confirmationMessages };
@@ -34,7 +36,7 @@ export class LocalReviewTool implements vscode.LanguageModelTool<ToolInput> {
         options: vscode.LanguageModelToolInvocationOptions<ToolInput>,
         _token: vscode.CancellationToken,
     ): Promise<vscode.LanguageModelToolResult> {
-        const { filePath, state } = options.input;
+        const { filePath, stage } = options.input;
 
         // Auto-detect review from current git branch
         const review = await this.resolveReview();
@@ -80,9 +82,9 @@ export class LocalReviewTool implements vscode.LanguageModelTool<ToolInput> {
             threads = threads.filter(t => t.filePath.includes(filePath));
         }
 
-        // Filter by state if specified
-        if (state) {
-            threads = threads.filter(t => t.state === state);
+        // Filter by stage if specified
+        if (stage) {
+            threads = threads.filter(t => stageOf(t) === stage);
         }
 
         const result = {
@@ -91,14 +93,16 @@ export class LocalReviewTool implements vscode.LanguageModelTool<ToolInput> {
                 compareBranch: review.targetBranch,
             },
             totalThreads: comments.threads.length,
-            unresolvedCount: comments.threads.filter(t => t.state === 'unresolved').length,
-            resolvedCount: comments.threads.filter(t => t.state === 'resolved').length,
+            countsByStage: Object.fromEntries(
+                (['todo', 'claude', 'later', 'closed'] as ThreadStage[]).map(s =>
+                    [s, comments.threads.filter(t => stageOf(t) === s).length])),
             threads: threads.map(t => ({
                 id: t.id,
                 filePath: t.filePath,
                 startLine: t.startLine,
                 endLine: t.endLine,
-                state: t.state,
+                stage: stageOf(t),
+                request: t.request,
                 comments: t.comments.map(c => ({
                     author: c.author,
                     body: c.body,

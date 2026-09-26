@@ -34,9 +34,9 @@ export class LocalPrManager {
      * Drop every comment anchor once, on upgrade. v0.3.17 created anchors by
      * guessing the "original code" from the CURRENT file, which was wrong for any
      * comment whose code had already changed (it showed the drifted code as the
-     * original). v0.3.18 only sets anchors when it actually knows them (local
-     * create-time, or a GitHub diff_hunk), so the guessed ones must go. Idempotent
-     * via the registry flag — re-derived correctly on next create / re-import.
+     * original). v0.3.18 only sets anchors when it actually knows them (at
+     * create-time), so the guessed ones must go. Idempotent via the registry
+     * flag — re-derived correctly on next create.
      */
     private resetAnchorsOnce(): void {
         if (this.registry.anchorsReset) { return; }
