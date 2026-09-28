@@ -65,9 +65,14 @@ vsix="$repo/vscode/local-pr-review.vsix"
 if ! command -v npm >/dev/null 2>&1; then
   echo "npm not found; skipping the Local Review extension build"
 else
+  # Every build gets a version of its own (the tracked major.minor, then the
+  # build time) so VS Code treats it as an update: reinstalling the same version
+  # replaces the files in place, and open windows keep running the old code
+  # without asking for a reload.
+  version="$(cd "$ext" && node -p 'require("./package.json").version.split(".").slice(0, 2).join(".")').$(date -u +%Y%m%d%H%M%S)"
   # Lifecycle scripts are not needed by this dependency set; skipping them keeps
   # the install from running arbitrary package code.
-  (cd "$ext" && npm ci --ignore-scripts --no-audit --no-fund && npm run package)
+  (cd "$ext" && npm ci --ignore-scripts --no-audit --no-fund && npm run package -- "$version" --no-update-package-json)
   server="$(ls -dt "$HOME"/.vscode-server/cli/servers/Stable-*/server 2>/dev/null | head -1 || true)"
   if command -v code >/dev/null 2>&1; then
     cli=(code)
