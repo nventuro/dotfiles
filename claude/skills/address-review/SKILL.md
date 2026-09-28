@@ -26,6 +26,12 @@ file — automatically, nothing to run yourself. You review the outcome afterwar
 VS Code (**Local Review: Refresh**): every thread handled here either closed or came
 back to To do.
 
+**The threads are the only place the user reads your answers.** Everything they need
+from a thread (the answer, the reasoning, caveats, what you didn't verify, the
+decision left to them) goes in that thread's reply, in full. The chat gets only the
+status report from step 4 and step 5's learnings lines: no per-thread explanations,
+no follow-ups, no next step. Anything said only in the chat is lost.
+
 ## Storage layout
 
 At the repo root, `.vscode/local-reviews/`:
@@ -99,19 +105,31 @@ Each **thread**:
    ```
 
    Each result is `{ "id", "action", "reply" }`, one per thread from step 1:
-   - **changed code** → `{"id","action":"applied","reply":"<one line of what you
-     did>"}`. The thread closes if its `request` was `apply-close`; otherwise it
-     goes back to To do, tagged `applied`, for the user to check.
+   - **changed code** → `{"id","action":"applied","reply":"<what you changed>"}`.
+     The thread closes if its `request` was `apply-close`; otherwise it goes back to
+     To do, tagged `applied`, for the user to check. The user doesn't read closed
+     threads, so if the reply needs them to act (the change differs from what was
+     asked, a caveat, something you didn't verify, a question), add
+     `"close": false` to send an `apply-close` thread back to To do instead.
    - **no code change** (an answer, pushback or question) → `{"id","action":"reply",
-     "reply":"<short, concrete reply>"}`. The thread goes back to To do, tagged
+     "reply":"<your full reply>"}`. The thread goes back to To do, tagged
      `Claude replied`.
+
+   Each `reply` is the complete message to the user about that thread, not a
+   summary of it: write it as you would have written the answer in the chat, with
+   the full reasoning, the evidence (commits, functions, the failing case), caveats
+   and anything you didn't verify, and the decision or question left to the user.
+   Replies render as Markdown, so paragraphs, lists and code spans work. Length
+   follows the content: an edit that did exactly what was asked is one line, an
+   answer to a question takes as long as the answer needs. On a code change, also
+   say anything that differs from what was asked.
 
    `apply-results` authors every reply as `claude`, preserves every other field +
    thread order, never deletes threads, and reports `{closed, returned, from_later,
    missing}` (`missing > 0` means an id didn't match — recheck it).
 
-4. **Report** in this format, getting the per-pass counts with
-   `python3 ~/.claude/scripts/local-review-post.py stats`:
+4. **Report the status, and nothing else,** in this format, getting the per-pass
+   counts with `python3 ~/.claude/scripts/local-review-post.py stats`:
 
    ```text
    16 threads handled
@@ -119,7 +137,6 @@ Each **thread**:
       3 applied, back in To do for you to check
       3 answered, back in To do
       1 pushed back or asked, back in To do
-          src/foo.ts:42 — <one line>
    3 Later threads returned to To do
 
    Review so far
@@ -130,8 +147,9 @@ Each **thread**:
      codex           1   1 (100%)           0      0
    ```
 
-   - Leave out outcome lines with a count of 0. List each thread pushed back on
-     or asked about as `filePath:startLine — <one line>`: those wait on the user.
+   - Leave out outcome lines with a count of 0.
+   - Say nothing about individual threads: no answers, explanations or next steps
+     before or after the report. They are in the threads.
    - The table has a row per pass in `stats`, in the order above, with `applied`
      also as a percentage of `found`. Leave it out when `stats` has no passes.
 
@@ -158,7 +176,7 @@ Each **thread**:
      injects) and the file tight. Then finish with one line per rule added or
      bumped, quoting its headline and new `(seen Nx)` count, since the file is
      injected into every session. If nothing this batch is generalizable, write
-     nothing and say so.
+     nothing and say nothing.
 
 ## Notes
 

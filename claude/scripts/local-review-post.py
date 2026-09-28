@@ -491,10 +491,12 @@ def cmd_apply_results():
     """Record how Claude handled each thread in comments.json in ONE write, then
     return every Later thread to To do: this marks the end of a round.
     Reads a JSON array from stdin; each item:
-      { "id": <threadId>, "action": "applied"|"reply", "reply"?: str }
+      { "id": <threadId>, "action": "applied"|"reply", "reply"?: str, "close"?: bool }
     Semantics (replies are always authored by 'claude'):
       - applied  Claude changed code → applied=true; the thread closes if its request
-                 was "apply-close", else goes back to To do. `reply` says what changed.
+                 was "apply-close" and `close` isn't false, else goes back to To do.
+                 `reply` says what changed; `close: false` is for a reply the user
+                 needs to act on, which a closed thread would hide.
       - reply    no code change (an answer, pushback or question) → applied=false,
                  back to To do with `reply` appended.
     Never deletes threads."""
@@ -522,7 +524,7 @@ def cmd_apply_results():
         reply = (r.get("reply") or "").strip()
         if r.get("action") == "applied":
             t["applied"] = True
-            if t.get("request") == "apply-close":
+            if t.get("request") == "apply-close" and r.get("close", True):
                 _move(t, "closed")
                 closed += 1
             else:
