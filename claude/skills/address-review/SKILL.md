@@ -44,6 +44,7 @@ Each **thread**:
 | `stage` | `todo`, `claude`, `later` or `closed` |
 | `request` | on a `claude` thread: `apply-close` or `apply` when the user asked for the thread's change to be made; absent when they only replied |
 | `applied` | whether Claude changed code the last time it handled the thread |
+| `passes` | on a thread posted from review findings: the review passes that raised it (`learnings`, `team`, `claude`, `codex`) |
 | `comments` | array of `{ id, body, author, timestamp }`; `comments[0].body` is the review note, later entries are replies |
 
 ## Steps
@@ -109,11 +110,30 @@ Each **thread**:
    thread order, never deletes threads, and reports `{closed, returned, from_later,
    missing}` (`missing > 0` means an id didn't match — recheck it).
 
-4. **Report** briefly, grouped: closed after applying, as
-   `filePath:startLine — <one line>`; back to the user with a change to check;
-   back with an answer; pushed back or asked, as
-   `filePath:startLine — pushback: <one line>`; and how many Later threads
-   returned to To do.
+4. **Report** in this format, getting the per-pass counts with
+   `python3 ~/.claude/scripts/local-review-post.py stats`:
+
+   ```text
+   16 threads handled
+      9 applied and closed
+      3 applied, back in To do for you to check
+      3 answered, back in To do
+      1 pushed back or asked, back in To do
+          src/foo.ts:42 — <one line>
+   3 Later threads returned to To do
+
+   Review so far
+     pass        found   applied    dismissed   open
+     learnings       9   6 (67%)            2      1
+     team           11   7 (64%)            3      1
+     claude          7   3 (43%)            3      1
+     codex           1   1 (100%)           0      0
+   ```
+
+   - Leave out outcome lines with a count of 0. List each thread pushed back on
+     or asked about as `filePath:startLine — <one line>`: those wait on the user.
+   - The table has a row per pass in `stats`, in the order above, with `applied`
+     also as a percentage of `found`. Leave it out when `stats` has no passes.
 
 5. **Then learn — distill your applied comments into preferences (do this LAST,
    after the report).** For the threads you **applied** that **you authored**

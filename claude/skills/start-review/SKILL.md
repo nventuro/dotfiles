@@ -56,7 +56,9 @@ enter them at the step noted.
 Invoke `review-as-codex` with the chosen scope now — it is the slowest pass.
 Follow it through context gathering and prompt building (skip its scope
 detection), then launch its `codex exec` command with `run_in_background` so
-step 3 proceeds while Codex works.
+step 3 proceeds while Codex works. Prefix the command with `SECONDS=0; ` and end
+it with `; echo "codex took ${SECONDS}s"`, so it reports how long the pass ran
+(step 6); if Codex has to be rerun, add the two times.
 
 ## 3. Learnings, team and claude passes in parallel
 
@@ -100,7 +102,10 @@ Merge the learnings and team results per review-as-team step 5 (same file/line
 + equivalent issue → one finding, union `flagged_by`), then post them per its
 step-6 Local PR Review mode. Author is `learnings` when only the learnings pass
 flagged it, with a body starting `"[<category>] (learnings: <rule>)\n\n<body>"`;
-`team` otherwise.
+`team` otherwise. Give each finding `"passes"`: `"learnings"` when its
+`flagged_by` includes `learnings`, and `"team"` when it includes anyone else.
+Keep the `ids` that `post` prints (each finding's thread, in input order) for
+step 5.
 
 Hold the claude agent's findings until Codex finishes (step 5).
 
@@ -112,21 +117,45 @@ independently, so a finding both raised is the strongest signal of the run:
 
 - A finding both raised (same file, overlapping lines, same issue) becomes one
   thread, authored `claude`, with a body starting
-  `"[<higher severity>] (claude, codex agree)\n\n<body>"` and the more concrete of
-  the two suggestions.
+  `"[<higher severity>] (claude, codex agree)\n\n<body>"`, the more concrete of
+  the two suggestions, and `"passes": ["claude", "codex"]`.
 - Every other finding keeps its own reviewer as author, with a body starting
   `"[<severity>] (<reviewer>)\n\n<body>"`.
 
-Drop any finding equivalent to one posted in step 4, then post the rest the way
-review-as-codex step 5 posts Codex's.
+A finding equivalent to one posted in step 4 is not posted again; instead,
+record that its reviewers raised that thread too:
+`printf '%s' '[{"id": "<thread id>", "passes": ["claude"]}]' | python3 ~/.claude/scripts/local-review-post.py add-passes`.
+Post the rest the way review-as-codex step 5 posts Codex's.
 
 ## 6. Summary
 
-Report how many threads the previous review archived (and the archive file),
-per-pass finding counts, and how many findings Claude and Codex agreed on, and
-remind: run **Local Review: Refresh**, go through To do (**Step through** in the
-Comments view), then `/address-review`. A pass returning zero findings is a fine
-outcome — report it, don't force findings.
+Get the per-pass counts with
+`python3 ~/.claude/scripts/local-review-post.py stats` and report in this format:
+
+```text
+Archived 12 threads → <archive_file>
+
+  pass        found   unique     time
+  learnings       9   6 (67%)    1m 52s
+  team           11   6 (55%)    3m 05s
+  claude          7   5 (71%)    2m 41s
+  codex           1   1 (100%)   7m 18s
+
+23 To do threads after dedup
+```
+
+- The archive line comes from step 1's `archive` output; leave it out when
+  nothing was archived.
+- `found` and `unique` are each pass's counts from `stats`, with `unique` also
+  as a percentage of `found`. A pass missing from `stats` found nothing: show
+  `0` and `—`. The thread total is `stats`' `threads`.
+- `time` is how long each pass ran: the `duration_ms` in its agent's completion
+  notification (for the team pass, its reviewer agent's), and for Codex the time
+  its command printed.
+
+Then remind: run **Local Review: Refresh**, go through To do (**Step through** in
+the Comments view), then `/address-review`. A pass returning zero findings is a
+fine outcome — report it, don't force findings.
 
 ## Guidelines
 

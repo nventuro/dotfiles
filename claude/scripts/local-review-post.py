@@ -19,9 +19,13 @@ Subcommands:
   post           Read a findings JSON array from stdin and append each as a To do
                  thread to the active review's comments.json (preserving existing
                  threads), skipping findings already posted against the same code.
+                 Prints the id of each finding's thread, in input order.
+  add-passes     Read [{ "id", "passes" }] from stdin and add those passes to each
+                 thread's, for a finding another pass raised too.
   list-actionable  Emit the threads with Claude, sorted by file then line.
   apply-results  Read per-thread outcomes (applied / reply) from stdin, record them
                  in comments.json in one write, and return Later threads to To do.
+  stats          Print per-pass finding counts for the active review.
 
 Run from inside the worktree — the .vscode/local-reviews/ files live there.
 Threads are written in the Local Review extension's storage format: uuid4 ids,
@@ -33,7 +37,9 @@ numbers crossing this script's interface (findings in, list-actionable out) are
 Findings (stdin to `post`) is a JSON array; each item:
   { "file"|"filePath": str, "line"|"startLine": int (1-based), "endLine"?: int,
     "body": str (markdown; a "💡 **Suggestion:**" ```diff block applies verbatim),
-    "author"?: str (default "team") }
+    "author"?: str (default "team"),
+    "passes"?: [str] (the review passes that raised it, e.g. "team" or "codex";
+                      default [author]) }
 """
 
 import getpass
@@ -61,6 +67,11 @@ def _move(thread, stage, request=None):
     # Superseded by `stage`; left in place they would contradict it.
     thread.pop("state", None)
     thread.pop("disposition", None)
+
+
+def _add_passes(thread, passes):
+    """Record on a thread which review passes raised its finding."""
+    thread["passes"] = sorted(set(thread.get("passes") or []) | set(passes))
 
 
 def _write_json(path, data):
@@ -350,20 +361,24 @@ def cmd_post():
     # A finding is skipped when an existing thread, in any state, already raises it
     # on the same code: a pass posting in several batches never doubles a thread,
     # and a finding the user discarded stays settled for the rest of the review.
-    existing_findings = set()
+    existing_findings = {}
     for t in data["threads"]:
         if t.get("comments"):
             head = t["comments"][0]
-            existing_findings |= _finding_keys(
-                t.get("filePath"), head.get("author"), head.get("body"),
-                t.get("startLine"), t.get("endLine"), (t.get("anchor") or {}).get("code"))
+            for key in _finding_keys(
+                    t.get("filePath"), head.get("author"), head.get("body"),
+                    t.get("startLine"), t.get("endLine"), (t.get("anchor") or {}).get("code")):
+                existing_findings[key] = t
     posted = duplicates = 0
+    ids = []
     for f in findings:
         fp = f.get("filePath") or f.get("file")
         body = (f.get("body") or "").strip()
         if not fp or not body:
+            ids.append(None)
             continue
         comment = _make_comment(body, f.get("author"))
+        passes = f.get("passes") or [comment["author"]]
         start = int(f.get("startLine") or f.get("line") or 1)
         end = int(f.get("endLine") or start)
         stored_start, stored_end = start - 1, end - 1
@@ -372,7 +387,11 @@ def cmd_post():
         code = _anchor_code(root, fp, start, end)
         keys = _finding_keys(fp, comment["author"], body, stored_start, stored_end, code)
         legacy = _finding_keys(fp, comment["author"], body, stored_start, stored_end, None)
-        if (keys | legacy) & existing_findings:
+        existing = next(
+            (existing_findings[k] for k in keys | legacy if k in existing_findings), None)
+        if existing:
+            _add_passes(existing, passes)
+            ids.append(existing["id"])
             duplicates += 1
             continue
         thread = {
@@ -383,17 +402,52 @@ def cmd_post():
             "stage": "todo",
             "comments": [comment],
         }
+        _add_passes(thread, passes)
         if code is not None:
             thread["anchor"] = {"code": code}
         data["threads"].append(thread)
+        ids.append(thread["id"])
         posted += 1
     _write_json(comments_path, data)
     print(json.dumps({
         "posted": posted,
         "duplicates": duplicates,
+        "ids": ids,
         "comments_file": str(comments_path),
         "total_threads": len(data["threads"]),
     }))
+    return 0
+
+
+def cmd_add_passes():
+    """Record that more passes raised the finding of an existing thread, for a
+    finding that is not posted because an equivalent thread already exists.
+    Reads a JSON array from stdin; each item: { "id": <threadId>, "passes": [str] }."""
+    root = _repo_root()
+    review, comments_path, data = _load_active(root)
+    if not review:
+        sys.stderr.write("local-review-post: no active review.\n")
+        return 3
+    try:
+        items = json.loads(sys.stdin.read())
+    except Exception as e:
+        sys.stderr.write(f"local-review-post: bad JSON on stdin: {e}\n")
+        return 2
+    if not isinstance(items, list):
+        sys.stderr.write("local-review-post: stdin must be a JSON array.\n")
+        return 2
+
+    by_id = {t["id"]: t for t in data["threads"]}
+    updated = missing = 0
+    for item in items:
+        t = by_id.get(item.get("id"))
+        if not t:
+            missing += 1
+            continue
+        _add_passes(t, item.get("passes") or [])
+        updated += 1
+    _write_json(comments_path, data)
+    print(json.dumps({"updated": updated, "missing": missing}))
     return 0
 
 
@@ -494,9 +548,50 @@ def cmd_apply_results():
     return 0
 
 
+def cmd_stats():
+    """Per-pass finding counts over the active review's threads. A thread counts
+    toward every pass that raised its finding, so a finding several passes raised
+    is credited to all of them rather than to whichever authored the thread.
+    Per pass:
+      found      threads it raised
+      unique     of those, threads no other pass raised
+      applied    of those, threads Claude changed code for
+      dismissed  of those, threads closed without a code change
+      open       of those, the rest
+    `threads` counts the threads any pass raised; threads without `passes` (the
+    user's own comments) are left out."""
+    root = _repo_root()
+    review, _, data = _load_active(root)
+    if not review:
+        print(json.dumps({"active": False}))
+        return 0
+    threads = 0
+    per_pass = {}
+    for t in data["threads"]:
+        passes = t.get("passes") or []
+        if not passes:
+            continue
+        threads += 1
+        if t.get("applied"):
+            outcome = "applied"
+        elif _stage(t) == "closed":
+            outcome = "dismissed"
+        else:
+            outcome = "open"
+        for p in passes:
+            counts = per_pass.setdefault(
+                p, {"found": 0, "unique": 0, "applied": 0, "dismissed": 0, "open": 0})
+            counts["found"] += 1
+            if len(passes) == 1:
+                counts["unique"] += 1
+            counts[outcome] += 1
+    print(json.dumps({"active": True, "threads": threads, "passes": per_pass}, indent=2))
+    return 0
+
+
 def main():
-    cmds = ("status", "ensure-review", "pending", "archive", "post", "list-actionable",
-            "apply-results")
+    cmds = ("status", "ensure-review", "pending", "archive", "post", "add-passes",
+            "list-actionable", "apply-results", "stats")
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         sys.stderr.write(f"usage: local-review-post.py {{{'|'.join(cmds)}}}\n")
         return 2
@@ -513,6 +608,10 @@ def main():
         return cmd_list_actionable()
     if cmd == "apply-results":
         return cmd_apply_results()
+    if cmd == "add-passes":
+        return cmd_add_passes()
+    if cmd == "stats":
+        return cmd_stats()
     return cmd_post()
 
 
