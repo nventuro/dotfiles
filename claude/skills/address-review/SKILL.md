@@ -114,6 +114,12 @@ Each **thread**:
    - **no code change** (an answer, pushback or question) → `{"id","action":"reply",
      "reply":"<your full reply>"}`. The thread goes back to To do, tagged
      `Claude replied`.
+   - **a thread going back to To do whose code your edit removed or rewrote** (a
+     deletion, a rename, a move) also gets `"anchor": "<lines copied exactly from the
+     thread's file>"`: the code that now stands where the thread's code was, such as
+     the renamed declaration or the call to the helper that replaced the removed code.
+     The extension shows a thread by finding the code it is anchored on, so without
+     this the thread appears nowhere inline. Pick lines unique in the file.
 
    Each `reply` is the complete message to the user about that thread, not a
    summary of it: write it as you would have written the answer in the chat, with
@@ -126,7 +132,9 @@ Each **thread**:
 
    `apply-results` authors every reply as `claude`, preserves every other field +
    thread order, never deletes threads, and reports `{closed, returned, from_later,
-   missing}` (`missing > 0` means an id didn't match — recheck it).
+   missing, reanchored, bad_anchor}` (`missing > 0` means an id didn't match — recheck
+   it; `bad_anchor > 0` means an `anchor` wasn't found in its thread's file, so that
+   thread stayed where it was).
 
 4. **Report the status, and nothing else,** in this format, getting the per-pass
    counts with `python3 ~/.claude/scripts/local-review-post.py stats`:
@@ -137,6 +145,7 @@ Each **thread**:
       3 applied, back in To do for you to check
       3 answered, back in To do
       1 pushed back or asked, back in To do
+   1 back in To do but on no code (find it in the sidebar)
    3 Later threads returned to To do
 
    Review so far

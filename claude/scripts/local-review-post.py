@@ -25,6 +25,7 @@ Subcommands:
   list-actionable  Emit the threads with Claude, sorted by file then line.
   apply-results  Read per-thread outcomes (applied / reply) from stdin, record them
                  in comments.json in one write, and return Later threads to To do.
+                 A result may move its thread onto new code (`anchor`).
   stats          Print per-pass finding counts for the active review.
 
 Run from inside the worktree — the .vscode/local-reviews/ files live there.
@@ -120,6 +121,33 @@ def _anchor_code(root, file_path, start, end):
     if start < 1 or end < start or end > len(lines):
         return None
     return "\n".join(lines[start - 1:end])
+
+
+def _code_lines(code):
+    """`code`'s lines as the extension matches them: trailing whitespace and
+    leading/trailing blank lines dropped."""
+    lines = [line.rstrip() for line in code.splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
+
+
+def _find_code(root, file_path, code):
+    """0-based line where `code` first appears in a repo file, or -1 when the file
+    or the code is missing — where the extension would place a thread anchored on it."""
+    block = _code_lines(code)
+    try:
+        doc = [line.rstrip() for line in (Path(root) / file_path).read_text().splitlines()]
+    except Exception:
+        return -1
+    if not block:
+        return -1
+    for i in range(len(doc) - len(block) + 1):
+        if doc[i:i + len(block)] == block:
+            return i
+    return -1
 
 
 def _finding_keys(file_path, author, body, start, end, anchor_code):
@@ -491,7 +519,8 @@ def cmd_apply_results():
     """Record how Claude handled each thread in comments.json in ONE write, then
     return every Later thread to To do: this marks the end of a round.
     Reads a JSON array from stdin; each item:
-      { "id": <threadId>, "action": "applied"|"reply", "reply"?: str, "close"?: bool }
+      { "id": <threadId>, "action": "applied"|"reply", "reply"?: str, "close"?: bool,
+        "anchor"?: str }
     Semantics (replies are always authored by 'claude'):
       - applied  Claude changed code → applied=true; the thread closes if its request
                  was "apply-close" and `close` isn't false, else goes back to To do.
@@ -499,6 +528,10 @@ def cmd_apply_results():
                  needs to act on, which a closed thread would hide.
       - reply    no code change (an answer, pushback or question) → applied=false,
                  back to To do with `reply` appended.
+    `anchor` is code in the thread's file to place the thread on, for an edit that
+    removed or rewrote the code it was on: the extension places a thread by
+    searching for its anchored code, so without it the thread shows nowhere inline.
+    An `anchor` not found in the file is left out and counted in `bad_anchor`.
     Never deletes threads."""
     root = _repo_root()
     review, comments_path, data = _load_active(root)
@@ -515,12 +548,22 @@ def cmd_apply_results():
         return 2
 
     by_id = {t["id"]: t for t in data["threads"]}
-    closed = returned = missing = 0
+    closed = returned = missing = reanchored = bad_anchor = 0
     for r in results:
         t = by_id.get(r.get("id"))
         if not t:
             missing += 1
             continue
+        code = r.get("anchor")
+        if code:
+            line = _find_code(root, t["filePath"], code)
+            if line < 0:
+                bad_anchor += 1
+            else:
+                t["anchor"] = {"code": "\n".join(_code_lines(code))}
+                t["startLine"] = line
+                t["endLine"] = line + len(_code_lines(code)) - 1
+                reanchored += 1
         reply = (r.get("reply") or "").strip()
         if r.get("action") == "applied":
             t["applied"] = True
@@ -546,6 +589,7 @@ def cmd_apply_results():
     _write_json(comments_path, data)
     print(json.dumps({
         "closed": closed, "returned": returned, "from_later": from_later, "missing": missing,
+        "reanchored": reanchored, "bad_anchor": bad_anchor,
     }))
     return 0
 
@@ -557,9 +601,9 @@ def cmd_stats():
     Per pass:
       found      threads it raised
       unique     of those, threads no other pass raised
-      applied    of those, threads Claude changed code for
+      applied    of those, closed threads Claude changed code for
       dismissed  of those, threads closed without a code change
-      open       of those, the rest
+      open       of those, threads not closed yet
     `threads` counts the threads any pass raised; threads without `passes` (the
     user's own comments) are left out."""
     root = _repo_root()
@@ -574,12 +618,12 @@ def cmd_stats():
         if not passes:
             continue
         threads += 1
-        if t.get("applied"):
-            outcome = "applied"
-        elif _stage(t) == "closed":
-            outcome = "dismissed"
-        else:
+        if _stage(t) != "closed":
             outcome = "open"
+        elif t.get("applied"):
+            outcome = "applied"
+        else:
+            outcome = "dismissed"
         for p in passes:
             counts = per_pass.setdefault(
                 p, {"found": 0, "unique": 0, "applied": 0, "dismissed": 0, "open": 0})
