@@ -531,6 +531,7 @@ def cmd_apply_results():
     `anchor` is code in the thread's file to place the thread on, for an edit that
     removed or rewrote the code it was on: the extension places a thread by
     searching for its anchored code, so without it the thread shows nowhere inline.
+    It is stored as the thread's `anchor.movedTo`, keeping `anchor.code`.
     An `anchor` not found in the file is left out and counted in `bad_anchor`.
     Never deletes threads."""
     root = _repo_root()
@@ -560,7 +561,10 @@ def cmd_apply_results():
             if line < 0:
                 bad_anchor += 1
             else:
-                t["anchor"] = {"code": "\n".join(_code_lines(code))}
+                moved_to = "\n".join(_code_lines(code))
+                # `code` stays what the comment was written against, which the
+                # extension shows as the code at the time of the comment.
+                t.setdefault("anchor", {"code": moved_to})["movedTo"] = moved_to
                 t["startLine"] = line
                 t["endLine"] = line + len(_code_lines(code)) - 1
                 reanchored += 1

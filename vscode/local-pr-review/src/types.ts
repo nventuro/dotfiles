@@ -85,8 +85,11 @@ export interface ReviewThread {
     // the comment is created. We never guess it later from the current file. When
     // the current block no longer matches `code`, the thread is "outdated" and we
     // surface `code` so the comment stays linked to what it was actually about.
+    // `movedTo` is the code the thread sits on instead, set when Claude's edit
+    // replaced `code` (a rename, a move, a rewrite): placement searches for it, while
+    // `code` keeps what the comment was written against.
     // Working-tree threads only.
-    anchor?: { code: string };
+    anchor?: { code: string; movedTo?: string };
     // Set when we auto-moved an after-side comment to the before side because its
     // code was DELETED from the working tree (so it shows on the removed/red lines
     // instead of floating on an unrelated working line). Distinguishes it from a

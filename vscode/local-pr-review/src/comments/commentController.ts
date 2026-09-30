@@ -145,9 +145,10 @@ export class ReviewCommentController {
 
         for (const t of comments.threads) {
             if (t.filePath !== filePath || placed.has(t.id) || !t.anchor) { continue; }
-            const loc = findBlockLine(text, t.anchor.code);
+            const code = placementCode(t.anchor);
+            const loc = findBlockLine(text, code);
             if (loc < 0) { continue; }
-            const span = normalizeCode(t.anchor.code).split('\n').length;
+            const span = normalizeCode(code).split('\n').length;
             const range = new vscode.Range(loc, 0, loc + span - 1, 0);
             const dKey = `${t.id}::${uri.toString()}`;
             const existing = this.threads.get(dKey);
@@ -302,15 +303,16 @@ export class ReviewCommentController {
                     t.onWorkingTree = true;
                     migrated = true;
                 }
-                const span = normalizeCode(t.anchor.code).split('\n').length;
-                const loc = text !== undefined ? findBlockLine(text, t.anchor.code) : -1;
+                const code = placementCode(t.anchor);
+                const span = normalizeCode(code).split('\n').length;
+                const loc = text !== undefined ? findBlockLine(text, code) : -1;
                 if (loc < 0 && text !== undefined) {
                     // Exact anchor gone (its code was edited — often to ADDRESS the
                     // comment, which is exactly when we must not lose it). Fall back to
                     // the closest matching line so it stays visible on the working tree,
                     // flagged outdated. Fuzzy is working-tree-only; if even that misses,
                     // detach (navigator-only) as before.
-                    const fuzzy = findBlockLineFuzzy(text, t.anchor.code);
+                    const fuzzy = findBlockLineFuzzy(text, code);
                     if (fuzzy >= 0) {
                         outdated.add(t.id);
                         this.placeWorkingInstance(t, fileUri, new vscode.Range(fuzzy, 0, fuzzy + span - 1, 0));
@@ -377,9 +379,10 @@ export class ReviewCommentController {
         const code = stored.anchor?.code ?? '';
         const s = stored.startLine + 1;
         const e = stored.endLine + 1;
-        const where = s === e ? `line ${s}` : `lines ${s}–${e}`;
+        // A moved thread's lines are those of the code it moved to, not of this code.
+        const where = stored.anchor?.movedTo !== undefined ? '' : s === e ? ` · line ${s}` : ` · lines ${s}–${e}`;
         const body = new vscode.MarkdownString();
-        body.appendMarkdown(`$(history) *Code at the time of this comment · ${where}*\n\n`);
+        body.appendMarkdown(`$(history) *Code at the time of this comment${where}*\n\n`);
         body.appendCodeblock(code, langFromPath(stored.filePath));
         body.supportThemeIcons = true;
         return {
@@ -771,6 +774,11 @@ function normalizeCode(s: string): string {
     while (lines.length && lines[0] === '') { lines.shift(); }
     while (lines.length && lines[lines.length - 1] === '') { lines.pop(); }
     return lines.join('\n');
+}
+
+/** The code a thread sits on: where Claude moved it, else the code it was written against. */
+function placementCode(anchor: { code: string; movedTo?: string }): string {
+    return anchor.movedTo ?? anchor.code;
 }
 
 /**
