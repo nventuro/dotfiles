@@ -38,6 +38,8 @@ else
   echo "core.excludesFile points at $excludes; add the lines from git/ignore to it yourself"
 fi
 
+link "$repo/readline/inputrc" "$HOME/.inputrc"
+
 # Store for the local-review skills: personal config plus the learnings the
 # reviews read. Kept out of the repo: it holds your team roster and fills with
 # quoted review comments, some from private repositories.

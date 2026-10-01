@@ -19,6 +19,7 @@ git clone git@github.com:nventuro/dotfiles.git ~/dotfiles
 | `claude/scripts/` | `~/.claude/scripts/` | Helper scripts the skills call |
 | `claude/agents/` | `~/.claude/agents/` | Subagents the skills spawn |
 | `git/ignore` | `~/.config/git/ignore` | Global git ignore |
+| `readline/inputrc` | `~/.inputrc` | Readline key bindings |
 | `vscode/local-pr-review/` | VS Code extensions | The Local Review extension, built from source |
 
 ## Local review kit
