@@ -1,7 +1,7 @@
 ---
 name: start-review
 description: Start a fresh local review of current changes — archive the previous review's threads, then run the full battery (self-review against your own learnings, teammate-pattern review via review-as-team, and independent general reviews by Claude and Codex), posting every finding as a To do thread in the Local Review extension for you to decide on and /address-review to act on. Use when the user says "/start-review" or asks for a full/complete local review before shipping.
-argument-hint: "[PR-number | branch-name | uncommitted]"
+argument-hint: "[PR-number | branch-name | uncommitted] [claude-model] [codex-model] [effort]"
 ---
 
 # Start Review
@@ -26,6 +26,15 @@ agents read them themselves.
 
 - Scope: the argument wins; otherwise detect as review-as-team step 2 does
   (uncommitted / all unpushed / PR / full branch).
+- Models and effort, never asked:
+  - The learnings, team and claude reviewer agents run with `model: "fable"`
+    and `effort: "xhigh"`. A Claude model named in the arguments (`fable`,
+    `opus`, `sonnet`, `haiku`) replaces `fable`.
+  - Codex runs `gpt-6-astra` at `xhigh` (review-as-codex step 4). A Codex model
+    named in the arguments (`astra`, `sol`, `luna`, `gpt-...`) replaces it, as
+    review-as-codex step 4 resolves it.
+  - An effort level named in the arguments (`low`, `medium`, `high`, `xhigh`,
+    `max`) replaces `xhigh` for all four passes.
 - Ensure threads have somewhere to land:
   `python3 ~/.claude/scripts/local-review-post.py ensure-review`
 - Check what the previous review left unfinished:
@@ -38,8 +47,6 @@ agents read them themselves.
     new review; a "no" stops here, so the user can finish them first with
     `/address-review`.
   - Scope (only if several scopes have content).
-  - Model for the learnings, team and claude reviewer agents (review-as-team's
-    Fable/Opus/Sonnet/Default options).
   - Team learnings freshness (only if `team-learnings.md` is >30 days old:
     Update via `/learn-from-prs` / Use current).
 - Archive the previous review. This moves every thread to the review's
@@ -55,7 +62,8 @@ enter them at the step noted.
 
 Invoke `review-as-codex` with the chosen scope now — it is the slowest pass.
 Follow it through context gathering and prompt building (skip its scope
-detection), then launch its `codex exec` command with `run_in_background` so
+detection), then launch its `codex exec` command (step-1 Codex model and effort)
+with `run_in_background` so
 step 3 proceeds while Codex works. Prefix the command with `SECONDS=0; ` and end
 it with `; echo "codex took ${SECONDS}s"`, so it reports how long the pass ran
 (step 6); if Codex has to be rerun, add the two times.
@@ -64,7 +72,7 @@ it with `; echo "codex took ${SECONDS}s"`, so it reports how long the pass ran
 
 Send all three in a single message:
 
-**Learnings agent** — one Agent call (`code-reviewer`, step-1 model). Its prompt
+**Learnings agent** — one Agent call (`code-reviewer`, step-1 model and effort). Its prompt
 is this template, with `<diff>`, `<repo_root>` (`git rev-parse --show-toplevel`)
 and review-as-team's step-4 output spec filled in:
 
@@ -87,10 +95,10 @@ Set "rule" to the bold headline of the rule broken, and "flagged_by" to
 ```
 
 **Team pass** — invoke `review-as-team` entering at its step 4 (reviewer agent,
-step-1 model, the same `<diff>`), and collect its findings instead of letting it
-post.
+step-1 model and effort, the same `<diff>`), and collect its findings instead of
+letting it post.
 
-**Claude agent** — one Agent call (`code-reviewer`, step-1 model) whose prompt
+**Claude agent** — one Agent call (`code-reviewer`, step-1 model and effort) whose prompt
 is exactly the `$PROMPT` built for Codex in step 2, so both general reviewers
 get the same scope, context and assumptions to distrust, and return the same
 JSON. It starts with none of this session's context, which is what makes it a

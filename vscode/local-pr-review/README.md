@@ -15,7 +15,7 @@ now maintained here. The original license is retained in `LICENSE`.
 - **Two review modes.** *Uncommitted* shows the working tree against HEAD,
   grouped into staged, unstaged and untracked. *Whole branch* shows the branch
   against its base, which is the remote's default branch unless the
-  `localPrReview.defaultBase` setting or **Set review base** says otherwise.
+  `localPrReview.defaultBase` setting or **Local Review: Set Review Base** says otherwise.
 - **Inline threads** on any line of a diff, through VS Code's native comment
   UI, with reply, **Suggest a Change** (a diff block that `/address-review`
   applies verbatim), and edit and delete on your own comments.

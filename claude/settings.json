@@ -8,7 +8,7 @@
   "permissions": {
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
+  "model": "opus",
   "hooks": {
     "SessionStart": [
       {
@@ -39,5 +39,6 @@
   },
   "tui": "default",
   "skipDangerousModePermissionPrompt": true,
+  "switchModelsOnFlag": false,
   "skipAutoPermissionPrompt": true
 }

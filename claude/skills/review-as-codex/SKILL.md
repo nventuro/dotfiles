@@ -1,7 +1,7 @@
 ---
 name: review-as-codex
 description: Ask Codex to independently review current changes using the local checkout, with Claude preparing scope, base branch, and context.
-argument-hint: "[PR-number | branch-name | uncommitted]"
+argument-hint: "[PR-number | branch-name | uncommitted] [codex-model] [effort]"
 ---
 
 # Review As Codex
@@ -110,19 +110,20 @@ and how to enumerate them. Redirect its stdin from `/dev/null`: with stdin open
 it waits to read more prompt from it and never starts.
 
 Create a fresh file for Codex's findings (`mktemp -t codex-findings.XXXXXX`)
-and use the path it prints, written out literally, as `<findings>`:
+and use the path it prints, written out literally, as `<findings>`.
+
+Model and reasoning effort, without asking the user:
+
+- `<codex_model>` is `gpt-6-astra`, unless the user names a Codex model in the
+  arguments (`sol`, `astra`, `luna`, `gpt-6.1-sol`, ...). Resolve a short name
+  to the newest matching slug that `codex debug models` lists with
+  `"visibility": "list"` (for example `sol` → `gpt-6.1-sol`).
+- `<codex_effort>` is `xhigh`, unless the user names an effort level (`low`,
+  `medium`, `high`, `xhigh`, `max`, `ultra`). The model's own default can be as
+  low as no reasoning at all, so always pass it.
 
 ```bash
-codex exec --output-schema ~/.claude/skills/review-as-codex/findings-schema.json \
-  -o <findings> "$PROMPT" < /dev/null
-```
-
-If Codex answers that it could not inspect the local checkout because of a
-sandbox setup error, rerun with the sandbox disabled — acceptable for a
-read-only review of a trusted local repo:
-
-```bash
-codex exec -c 'sandbox_mode="danger-full-access"' \
+codex exec -m <codex_model> -c 'model_reasoning_effort="<codex_effort>"' \
   --output-schema ~/.claude/skills/review-as-codex/findings-schema.json \
   -o <findings> "$PROMPT" < /dev/null
 ```

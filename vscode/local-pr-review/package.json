@@ -113,161 +113,188 @@
     },
     "commands": [
       {
-        "command": "localPrReview.refreshComments",
-        "title": "Refresh Comments",
+        "command": "localPrReview.refresh",
+        "title": "Refresh",
+        "category": "Local Review",
         "icon": "$(refresh)"
       },
       {
         "command": "localPrReview.refreshPrs",
         "title": "Refresh PRs",
+        "category": "Local Review",
         "icon": "$(refresh)"
       },
       {
         "command": "localPrReview.createReview",
         "title": "Create Review",
+        "category": "Local Review",
         "icon": "$(add)"
       },
       {
         "command": "localPrReview.deleteReview",
         "title": "Delete Review",
+        "category": "Local Review",
         "icon": "$(trash)"
       },
       {
         "command": "localPrReview.activateReview",
-        "title": "Activate Review"
+        "title": "Activate Review",
+        "category": "Local Review"
       },
       {
         "command": "localPrReview.openDiff",
-        "title": "Open Diff"
-      },
-      {
-        "command": "localPrReview.refreshFiles",
-        "title": "Refresh Changed Files",
-        "icon": "$(refresh)"
+        "title": "Open Diff",
+        "category": "Local Review"
       },
       {
         "command": "localPrReview.setReviewBase",
-        "title": "Set review base…",
+        "title": "Set Review Base…",
+        "category": "Local Review",
         "icon": "$(git-branch)"
       },
       {
         "command": "localPrReview.applyAndClose",
         "title": "Apply & close: Claude makes the change on the next /address-review, then closes the thread",
+        "category": "Local Review",
         "icon": "$(rocket)"
       },
       {
         "command": "localPrReview.apply",
         "title": "Apply: Claude makes the change on the next /address-review, then sends the thread back to you to check",
+        "category": "Local Review",
         "icon": "$(tools)"
       },
       {
         "command": "localPrReview.later",
         "title": "Later: set aside until the next /address-review",
+        "category": "Local Review",
         "icon": "$(watch)"
       },
       {
         "command": "localPrReview.discard",
         "title": "Discard: remove it from the review; nothing more happens with it",
+        "category": "Local Review",
         "icon": "$(trash)"
       },
       {
         "command": "localPrReview.undo",
         "title": "Undo: take it back from Claude and return it to To do",
+        "category": "Local Review",
         "icon": "$(discard)"
       },
       {
         "command": "localPrReview.reopen",
         "title": "Reopen: move it back to To do",
+        "category": "Local Review",
         "icon": "$(issue-reopened)"
       },
       {
         "command": "localPrReview.stepThrough",
         "title": "Step through To do",
+        "category": "Local Review",
         "icon": "$(checklist)"
       },
       {
         "command": "localPrReview.editComment",
         "title": "Edit",
+        "category": "Local Review",
         "icon": "$(edit)"
       },
       {
         "command": "localPrReview.saveEdit",
-        "title": "Save"
+        "title": "Save",
+        "category": "Local Review"
       },
       {
         "command": "localPrReview.cancelEdit",
-        "title": "Cancel"
+        "title": "Cancel",
+        "category": "Local Review"
       },
       {
         "command": "localPrReview.deleteComment",
         "title": "Delete",
+        "category": "Local Review",
         "icon": "$(close)"
       },
       {
         "command": "localPrReview.addComment",
-        "title": "Send to Claude"
+        "title": "Send to Claude",
+        "category": "Local Review"
       },
       {
         "command": "localPrReview.saveComment",
-        "title": "Send to Claude"
+        "title": "Send to Claude",
+        "category": "Local Review"
       },
       {
         "command": "localPrReview.cancelComment",
-        "title": "Cancel"
+        "title": "Cancel",
+        "category": "Local Review"
       },
       {
         "command": "localPrReview.openFile",
         "title": "Open File",
+        "category": "Local Review",
         "icon": "$(go-to-file)"
       },
       {
         "command": "localPrReview.expandAll",
         "title": "Expand All",
+        "category": "Local Review",
         "icon": "$(expand-all)"
       },
       {
         "command": "localPrReview.openAllDiffs",
         "title": "Open All Diffs",
+        "category": "Local Review",
         "icon": "$(diff-multiple)"
       },
       {
         "command": "localPrReview.suggestChange",
         "title": "Suggest a Change",
+        "category": "Local Review",
         "icon": "$(lightbulb)"
       },
       {
         "command": "localPrReview.unreviewAll",
         "title": "Unmark all reviewed",
+        "category": "Local Review",
         "icon": "$(clear-all)"
       },
       {
         "command": "localPrReview.reviewAll",
         "title": "Mark all reviewed",
+        "category": "Local Review",
         "icon": "$(check-all)"
       },
       {
         "command": "localPrReview.markFileNotReviewed",
         "title": "Mark not reviewed",
+        "category": "Local Review",
         "icon": "$(discard)"
       },
       {
         "command": "localPrReview.markChangeReviewed",
         "title": "Mark reviewed",
+        "category": "Local Review",
         "icon": "$(check)"
       },
       {
         "command": "localPrReview.markReviewedAtCursor",
         "title": "Mark hunk reviewed",
+        "category": "Local Review",
         "icon": "$(check)"
       },
       {
         "command": "localPrReview.markSelectedFileReviewed",
         "title": "Mark file reviewed",
+        "category": "Local Review",
         "icon": "$(check)"
       },
       {
         "command": "localPrReview.replyComment",
         "title": "Reply: tell Claude what you want; it answers on the next /address-review",
+        "category": "Local Review",
         "icon": "$(comment)"
       }
     ],
@@ -324,7 +351,7 @@
           "group": "navigation@2"
         },
         {
-          "command": "localPrReview.refreshFiles",
+          "command": "localPrReview.refresh",
           "when": "view == localPrReview.changedFiles",
           "group": "navigation@3"
         },
@@ -334,7 +361,7 @@
           "group": "navigation@1"
         },
         {
-          "command": "localPrReview.refreshComments",
+          "command": "localPrReview.refresh",
           "when": "view == localPrReview.localComments",
           "group": "navigation@2"
         }

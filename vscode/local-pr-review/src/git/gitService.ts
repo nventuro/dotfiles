@@ -297,15 +297,15 @@ export class GitService {
   /**
    * Blob hash of each path's current working-tree content (`git hash-object`),
    * used as a content fingerprint for the reviewed-file staleness check. Paths
-   * with no on-disk file (deleted) are omitted, and hash-object aborts the whole
-   * batch on a missing path — so existing files are filtered first. Hashes come
-   * back in input order, one per line.
+   * that are not a file on disk (deleted, or a directory such as an untracked
+   * nested repository) are omitted, because hash-object aborts the whole batch
+   * on them. Hashes come back in input order, one per line.
    */
   async hashWorkingFiles(paths: string[]): Promise<Map<string, string>> {
     const result = new Map<string, string>();
     const existing = paths.filter((p) => {
       try {
-        return fs.existsSync(path.join(this.workspaceRoot, p));
+        return fs.statSync(path.join(this.workspaceRoot, p)).isFile();
       } catch {
         return false;
       }

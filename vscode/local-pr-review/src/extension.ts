@@ -473,6 +473,41 @@ export async function activate(context: vscode.ExtensionContext) {
   // the file counters go stale, and the two diff-side copies of a thread
   // diverge (one shows the reply, the other doesn't). Our own writes are
   // skipped via storageService.lastWriteAt so typing a comment doesn't flicker.
+  const reloadFromStorageNow = async () => {
+    // An external tool may have created or switched
+    // the active review in registry.json, which we hold in memory; re-read it
+    // so loadComments() targets the right review.
+    localPrManager.reloadRegistry();
+    const active = localPrManager.getActiveReview();
+    if (active && active.id !== loadedReviewId) {
+      // A different review just became active externally — do the full
+      // startup-style load (rebuild the file tree and all threads) rather
+      // than an in-place refresh of the previous review's instances.
+      loadedReviewId = active.id;
+      await changedFilesProvider.refresh();
+      syncReviewableFiles();
+      await commentController.loadAllThreads(
+        gitService,
+        active.sourceBranch,
+        active.targetBranch,
+      );
+      await refreshOutdated();
+      fileDecorationProvider.refresh();
+      return;
+    }
+    // Update every open thread instance in place (keeps both diff sides,
+    // incl. a staged diff's index side, without dispose/recreate).
+    commentController.refreshThreadComments();
+    syncReviewableFiles();
+    // An external write may have changed code or set
+    // `applied` — re-check drift so threads flip to Outdated + show the original.
+    await refreshOutdated();
+    fileDecorationProvider.refresh();
+    // Re-read the Reviewed marks too: starting a fresh review clears them in
+    // registry.json, and the files view holds its own copy.
+    await changedFilesProvider.refresh();
+    gitFileContentProvider.refresh();
+  };
   let reloadTimer: ReturnType<typeof setTimeout> | undefined;
   const reloadFromStorage = () => {
     if (reloadTimer) {
@@ -482,39 +517,7 @@ export async function activate(context: vscode.ExtensionContext) {
       if (Date.now() - storageService.lastWriteAt < 1500) {
         return;
       }
-      // An external tool may have created or switched
-      // the active review in registry.json, which we hold in memory; re-read it
-      // so loadComments() targets the right review.
-      localPrManager.reloadRegistry();
-      const active = localPrManager.getActiveReview();
-      if (active && active.id !== loadedReviewId) {
-        // A different review just became active externally — do the full
-        // startup-style load (rebuild the file tree and all threads) rather
-        // than an in-place refresh of the previous review's instances.
-        loadedReviewId = active.id;
-        await changedFilesProvider.refresh();
-        syncReviewableFiles();
-        await commentController.loadAllThreads(
-          gitService,
-          active.sourceBranch,
-          active.targetBranch,
-        );
-        await refreshOutdated();
-        fileDecorationProvider.refresh();
-        return;
-      }
-      // Update every open thread instance in place (keeps both diff sides,
-      // incl. a staged diff's index side, without dispose/recreate).
-      commentController.refreshThreadComments();
-      syncReviewableFiles();
-      // An external write may have changed code or set
-      // `applied` — re-check drift so threads flip to Outdated + show the original.
-      await refreshOutdated();
-      fileDecorationProvider.refresh();
-      // Re-read the Reviewed marks too: starting a fresh review clears them in
-      // registry.json, and the files view holds its own copy.
-      await changedFilesProvider.refresh();
-      gitFileContentProvider.refresh();
+      await reloadFromStorageNow();
     }, 300);
   };
   const commentsWatcher = vscode.workspace.createFileSystemWatcher(
@@ -591,15 +594,10 @@ export async function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  // Refresh changed files
+  // A manual reload does what an external write to the comments store does, for
+  // the changes no event reports, such as code that a tool outside VS Code edited.
   context.subscriptions.push(
-    vscode.commands.registerCommand("localPrReview.refreshFiles", async () => {
-      const active = localPrManager.getActiveReview();
-      if (active) {
-        await changedFilesProvider.refresh();
-        syncReviewableFiles();
-      }
-    }),
+    vscode.commands.registerCommand("localPrReview.refresh", reloadFromStorageNow),
   );
 
   // Expand all in changed files tree
@@ -1104,13 +1102,10 @@ export async function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  // Refresh commands for Local PRs and Local Comments
+  // Refresh command for Local PRs
   context.subscriptions.push(
     vscode.commands.registerCommand("localPrReview.refreshPrs", () => {
       localPrsProvider.refresh();
-    }),
-    vscode.commands.registerCommand("localPrReview.refreshComments", () => {
-      localCommentsProvider.refresh();
     }),
   );
 
