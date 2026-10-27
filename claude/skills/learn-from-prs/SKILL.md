@@ -72,11 +72,10 @@ on the smarter main thread. Don't invert this.
    - Read all map outputs, the current `team-learnings.md`, and the current
      `my-learnings.md`.
    - Route each reviewer's bullets: your teammates' to their section in
-     `team-learnings.md`, yours to `my-learnings.md`. Write your own as coding
-     rules in that file's format, since they are injected into coding
-     sessions: "prefer X", "don't do Y", not "asks for X". Skip
-     a rule your `CLAUDE.md` already states: it is loaded in every session already.
-   - For each reviewer, group their classified comments by
+     `team-learnings.md`, yours to `my-learnings.md`, recorded by the rules in
+     the `/learn` skill (`~/.claude/skills/learn/SKILL.md`, "Rules for
+     my-learnings.md").
+   - For each teammate, group their classified comments by
      theme and decide whether each comment:
      (a) reinforces an existing pattern → bump count, optionally add
          a fresh quote;
@@ -88,8 +87,8 @@ on the smarter main thread. Don't invert this.
          doubt between (b)/(c) and (d), drop — the file predicts future
          feedback, it is not an archive.
    - Edit both files directly.
-   - Keep file under ~300 lines. When merging, prefer abstracting two
-     near-duplicate bullets into one tighter one over piling on.
+   - Keep `team-learnings.md` under ~300 lines. When merging, prefer
+     abstracting two near-duplicate bullets into one tighter one over piling on.
 
 5. **Update tracker** (`~/.claude/local-review/team-learnings-tracker.json`):
    - **Only if PRs were actually processed** (i.e. the fetch returned
@@ -101,25 +100,18 @@ on the smarter main thread. Don't invert this.
    - Set `last_run` to current ISO timestamp.
 
 6. **Consolidate your own learnings** (piggybacking on this skill's
-   freshness cadence — no separate trigger needed): read
-   `~/.claude/local-review/my-learnings.md` and re-reduce it in place with
-   the same judgment as step 4:
+   runs — no separate trigger needed): read
+   `~/.claude/local-review/my-learnings.md` and re-reduce it in place by
+   the rules in `/learn`:
    - Merge near-duplicate bullets into one sharper rule; sum their
      `(seen Nx)` counts.
-   - Drop bullets that your `CLAUDE.md` already states.
-   - Keep the total bullet count at or under 30. The SessionStart
-     injector caps at 30 headlines, so the 30 most predictive rules
-     must be the ones that exist; when over, drop the weakest
-     `(seen 1x)` non-notable bullets first.
-   - When in doubt about a bullet's future value, drop it.
+   - Drop bullets those rules would not record.
    If nothing needs consolidating, skip silently. Do not touch the
    file's header/format section, only the rule bullets.
 
 7. **Report** summary: PRs fetched, filtered, processed, team patterns
    reinforced/added, and whether your own learnings needed consolidation.
-   Then one line per rule added to or bumped in `my-learnings.md`, quoting its
-   headline and new `(seen Nx)` count, since that file is injected into every
-   session.
+   Then the `my-learnings.md` report the `/learn` rules ask for.
 
 ## Roster
 
@@ -143,7 +135,8 @@ If the team composition changes, edit `config.json` — nowhere else.
 - Repos come from `repos` in `config.json`. PRs are addressed as
   `<repo>#<number>` because numbers collide across repos.
 - The script sizes batches to fit a map agent's context; don't regroup them
-- If no new PRs to process, report that and exit early
+- If no new PRs to process, report that and exit early, ending with the
+  over-cap warning the `/learn` rules end their report with
 - Never post comments on GitHub from this skill — it only reads and distills.
 - **Filter to the roster** — when spawning analyze-pr-reviews agents, pass
   them the reviewer list above and instruct them to drop everyone else's

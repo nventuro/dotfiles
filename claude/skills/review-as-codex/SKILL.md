@@ -91,6 +91,13 @@ gh pr diff <number> --name-only
 
 ### 4. Hand off to Codex
 
+Make sure a Local Review is active for step 5 to post to, and if this fails,
+report its error and stop, so a Codex run is never spent on findings with
+nowhere to go:
+```bash
+python3 ~/.claude/scripts/local-review-post.py ensure-review
+```
+
 Resolve the repository root dynamically and run Codex from that directory:
 
 ```bash
@@ -128,8 +135,9 @@ codex exec -m <codex_model> -c 'model_reasoning_effort="<codex_effort>"' \
   -o <findings> "$PROMPT" < /dev/null
 ```
 
-Build `$PROMPT` from the template below, with `<repo_root>` set to `$repo_root`.
-The first paragraph states the scope:
+Build `$PROMPT` from the template below, with `<repo_root>` set to `$repo_root`
+and `<output spec>` replaced by review-as-team step 4's output spec, which
+`findings-schema.json` mirrors. The first paragraph states the scope:
 use the uncommitted form shown, or for branch/PR scope "Review the changes on
 this branch against `<base>` in the repository at <repo_root>; enumerate them
 there with `git diff <base>...HEAD`."
@@ -157,14 +165,8 @@ behavior, and names that mislead or could be clearer. Skip formatting and
 other style. Leave out anything you are unsure of; an empty result is fine.
 Do not modify files.
 
-Output only a fenced ```json array. Each finding:
-{ "file": <repo-relative path>,
-  "line": <first line, numbered in the current file>,
-  "end_line": <last line, if more than one>,
-  "severity": "high" | "medium" | "low",
-  "body": <one sentence>,
-  "suggestion": { "before": <exact current lines, unique in the file>,
-                  "after": <replacement lines> } | null }
+<output spec>
+Set "rule" to null and "flagged_by" to [].
 ```
 
 If the review target is an external PR or branch that is not checked out
@@ -173,15 +175,10 @@ the prompt.
 
 ### 5. Integrate Codex results
 
-After Codex replies, check for an active **Local PR Review**:
-```bash
-python3 ~/.claude/scripts/local-review-post.py status
-```
-
-**If `active: true` → post Codex's findings as inline threads** (don't just print them):
+After Codex replies, post its findings as inline threads:
 - Read the `findings` array from `<findings>`. For each, build
   `{ "file", "line", "endLine": <end_line, or line when null>, "author": "codex", "body" }`.
-  `body` = `"[<severity>] (codex)\n\n<body>"`,
+  `body` = `"[<category>] (codex)\n\n<body>"`,
   plus — when the finding has a `suggestion` `{before, after}` — a verbatim-applicable block
   (`/address-review` applies it as-is):
   ````
@@ -196,9 +193,5 @@ python3 ~/.claude/scripts/local-review-post.py status
 - Post: `printf '%s' "$FINDINGS_JSON" | python3 ~/.claude/scripts/local-review-post.py post`
 - Tell the user: "Posted N Codex findings to Local Review — run **Local Review:
   Refresh**, go through To do, then `/address-review`."
-
-**Else** (no active review): present Codex findings without rewriting their substance,
-discard only what's clearly invalid, and ask whether to apply fixes. Claude implements
-any that are accepted; Codex only reviews.
 
 Do not post to GitHub unless the user explicitly asks.

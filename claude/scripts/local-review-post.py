@@ -8,7 +8,6 @@ optionally with a "request" of "apply" or "apply-close"), "later" (set aside
 until the next round) or "closed" (finished).
 
 Subcommands:
-  status         Print JSON about the active review, or {"active": false}.
   ensure-review  Make sure a review is active, creating a "whole branch" one for
                  the current branch if none is, so posting always has a target.
                  No-op when a review is already active.
@@ -255,30 +254,6 @@ def cmd_ensure_review():
         "sourceBranch": review["sourceBranch"],
         "targetBranch": review["targetBranch"],
         "mode": review.get("mode"),
-    }))
-    return 0
-
-
-def cmd_status():
-    root = _repo_root()
-    if not root:
-        print(json.dumps({"active": False, "error": "not a git repo"}))
-        return 0
-    review, comments_path = _active(root)
-    if not review:
-        print(json.dumps({"active": False}))
-        return 0
-    try:
-        n = len(json.loads(comments_path.read_text()).get("threads", []))
-    except Exception:
-        n = 0
-    print(json.dumps({
-        "active": True,
-        "comments_file": str(comments_path),
-        "sourceBranch": review["sourceBranch"],
-        "targetBranch": review["targetBranch"],
-        "reviewedFiles": review.get("reviewedFiles", []),
-        "thread_count": n,
     }))
     return 0
 
@@ -640,14 +615,12 @@ def cmd_stats():
 
 
 def main():
-    cmds = ("status", "ensure-review", "pending", "archive", "post", "add-passes",
+    cmds = ("ensure-review", "pending", "archive", "post", "add-passes",
             "list-actionable", "apply-results", "stats")
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         sys.stderr.write(f"usage: local-review-post.py {{{'|'.join(cmds)}}}\n")
         return 2
     cmd = sys.argv[1]
-    if cmd == "status":
-        return cmd_status()
     if cmd == "ensure-review":
         return cmd_ensure_review()
     if cmd == "pending":

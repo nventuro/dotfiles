@@ -1,20 +1,18 @@
 ---
 name: review-as-team
 description: Review current changes through the lens of teammate review patterns before submitting a PR.
-argument-hint: "[PR-number | branch-name]"
+argument-hint: "[PR-number | branch-name] [claude-model] [effort]"
 ---
 
 # Review As Team
 
 Apply learned reviewer patterns to the current branch's changes with one
-reviewer agent that carries all patterns. Findings are posted to the Local PR
-Review extension when a review is active, otherwise presented interactively in
-the terminal.
+reviewer agent that carries all patterns. Findings are posted as threads in the
+Local Review extension.
 
 ## Paths
 
 - Learnings: `~/.claude/local-review/team-learnings.md`
-- Tracker:   `~/.claude/local-review/team-learnings-tracker.json`
 - Diff file: a fresh file per run, created in step 3
 
 **Do NOT read the learnings file or diff content into main context.**
@@ -22,25 +20,16 @@ The reviewer agent reads them itself.
 
 ## Workflow
 
-### 1. Freshness
+### 1. Learnings file
 
-Check the tracker's `last_run` and whether the learnings file exists:
-
-- **Fresh (≤30 days)**: proceed silently.
-- **Stale (>30 days)**: ask with `AskUserQuestion`
-  (header="Learnings", multiSelect=false):
-  - question: `"Learnings are N days old. Update before reviewing?"`
-  - options:
-    - `Update` — run `/learn-from-prs` synchronously, then continue.
-    - `Use current` — proceed with the existing file.
-- **Missing or empty**: ask with `AskUserQuestion`:
-  - question: `"Learnings file is missing. Run /learn-from-prs now?"`
-  - options: `Run now` / `Abort`. If Abort, stop the skill.
+If the learnings file is missing or empty, ask with `AskUserQuestion`:
+- question: `"Learnings file is missing. Run /learn-from-prs now?"`
+- options: `Run now` / `Abort`. If Abort, stop the skill.
 
 ### 2. Scope + model
 
 If a PR number was passed as argument, scope = that external PR.
-Skip scope detection but still ask for the model.
+Skip scope detection.
 
 Otherwise detect scopes in parallel:
 ```bash
@@ -49,28 +38,24 @@ git log @{u}..HEAD --oneline 2>/dev/null           # non-empty = unpushed
 gh pr view --json number,title,url --jq '"\(.number) \(.title)"'  # ok = branch PR exists
 ```
 
-Ask the user via a single `AskUserQuestion` call with up to two questions:
+If multiple scopes have content, ask which one with `AskUserQuestion`
+(header="Scope", multiSelect=false), with options limited to scopes with
+content: Uncommitted / All unpushed / PR #N: <title> / Full branch. If exactly
+one scope has content, use it automatically and announce the selection.
 
-- **Model** (always asked):
-  - header="Model", multiSelect=false
-  - options (describe both quality and cost in each description):
-    - label=`Fable`, description=`Most capable. Best at subtle patterns and nuanced judgment; highest cost and slowest.`
-    - label=`Opus`, description=`Top-tier Opus. Strong on subtle patterns. ~5x the token cost of sonnet and notably slower.`
-    - label=`Sonnet`, description=`Solid mid tier. Catches most documented patterns. ~5x cheaper and faster than opus.`
-    - label=`Default`, description=`Inherit the session's model (no override).`
-- **Scope** (only if multiple scopes have content):
-  - header="Scope", multiSelect=false
-  - options limited to scopes with content: Uncommitted / All unpushed /
-    PR #N: <title> / Full branch.
+Model and effort for step 4, without asking the user:
 
-Map the model choice in step 4:
-- Fable → `model: "fable"` in the Agent call.
-- Opus → `model: "opus"`.
-- Sonnet → `model: "sonnet"`.
-- Default → omit the `model` field so it inherits the session.
+- `<model>` is `fable`, unless the user names a Claude model in the arguments
+  (`fable`, `opus`, `sonnet`, `haiku`).
+- `<effort>` is `xhigh`, unless the user names an effort level (`low`,
+  `medium`, `high`, `xhigh`, `max`).
 
-If exactly one scope has content, use it automatically and announce the
-selection — only the model question is asked.
+Make sure a Local Review is active for step 6 to post to, and if this fails,
+report its error and stop, so the reviewer agent never runs for findings with
+nowhere to go:
+```bash
+python3 ~/.claude/scripts/local-review-post.py ensure-review
+```
 
 ### 3. Write the diff
 
@@ -114,10 +99,10 @@ the reviewer as a phantom `+` finding.
 
 ### 4. Run the reviewer agent
 
-Single Agent call, `subagent_type: "code-reviewer"`, with `model` from the
-step-2 selection (Fable / Opus / Sonnet; Default → omit). Its prompt is the
-template below, with `<diff>`, `<repo_root>` (`git rev-parse --show-toplevel`)
-and the output spec filled in:
+Single Agent call, `subagent_type: "code-reviewer"`, with `model: "<model>"`
+and `effort: "<effort>"` from step 2. Its prompt is the template below, with
+`<diff>`, `<repo_root>` (`git rev-parse --show-toplevel`) and the output spec
+filled in:
 
 ```text
 Review the diff in <diff> the way the user's teammates would, using the review
@@ -138,8 +123,9 @@ Set "rule" to the bold headline of the pattern matched, and "flagged_by" to
 every reviewer whose pattern it matches.
 ```
 
-**Output spec**, pasted where a template says `<output spec>` (the learnings
-pass in `/start-review` uses it too):
+**Output spec**, pasted where a template says `<output spec>`. Every review
+pass uses it: this one, the learnings pass in `/start-review`, and the general
+review prompt in `review-as-codex` that Codex and the claude agent get:
 
 ```text
 Output only a fenced ```json array. Each finding:
@@ -163,17 +149,10 @@ Use a suggestion only for a concrete code change.
   merge them and union their `flagged_by` arrays.
 - Sort by priority (Security/Correctness > ApiDesign > Architecture >
   Clarity > Naming > Style), then file path, then line number.
-- Number sequentially `#1..#N`.
 
-### 6. Present the findings
+### 6. Post the findings
 
-First check for an active **Local PR Review**:
-```bash
-python3 ~/.claude/scripts/local-review-post.py status
-```
-
-**If `active: true` → Local PR Review mode.** Post the findings as inline threads
-instead of asking in the terminal, then stop:
+Post the findings as inline threads:
 - Build a JSON array; each item `{ "file": <path>, "line": <line>, "endLine":
   <end_line, or line when absent>, "author": "team", "body": <markdown> }`.
 - `body` starts `"[<category>] (team, flagged by <names>: <rule>)\n\n<body>"`. When the
@@ -191,40 +170,7 @@ instead of asking in the terminal, then stop:
   Copy `before` unchanged so the verbatim edit matches.
 - Post: `printf '%s' "$FINDINGS_JSON" | python3 ~/.claude/scripts/local-review-post.py post`
 - Tell the user: "Posted N findings to Local Review — run **Local Review:
-  Refresh**, go through To do, then `/address-review`." **Then stop** — do not run
-  the terminal flow (steps 7–8) or any `AskUserQuestion`.
-
-**Else → terminal mode** (steps 6–8 below).
-
-Print:
-```
-## Review: N recommendations across M files
-```
-
-Build one `AskUserQuestion` per finding:
-- `header`: `"#X [Category]"` (truncate category to 12 chars).
-- `question`: `"<body> (<file>:<line>, flagged by <names>)"`.
-- `preview`: when the finding has a `suggestion`, a code fence with its `before`
-  (with line numbers) and one with its `after`; otherwise the matched `rule`.
-- `multiSelect`: false.
-- options: `Apply` (apply the suggested fix) / `Skip` (leave as-is).
-
-Batch up to 4 per `AskUserQuestion` call. Wait for each batch before
-showing the next. Record each choice. "Other" responses carry custom
-user instructions for that finding.
-
-### 7. Apply
-
-- Plan mode: present a plan summarizing the selected changes.
-- Otherwise: apply each "Apply" via Edit/Write — the `suggestion` verbatim when
-  there is one, else the change `body` describes. After each, print
-  `Applied [X/N]: <short>`. Apply "Other" per the user's instructions.
-
-### 8. Summary
-
-```
-Review complete. Applied X/N recommendations, skipped Y.
-```
+  Refresh**, go through To do, then `/address-review`."
 
 ## Guidelines
 

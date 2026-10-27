@@ -43,7 +43,10 @@
   direction.
 - Keep diffs minimal and local to the task. Don't reformat, rename, or clean up
   code you weren't asked to touch, and don't delete existing comments or TODO
-  markers.
+  markers. Minimal means the fewest new paths, not the fewest changed lines. When
+  the change doesn't fit the existing code, adapt that code instead of adding a
+  special case or a near-copy beside it, if that reaches beyond the task, ask
+  first.
 - Never discard uncommitted work to get unstuck: no reverting changed files via
   `git checkout`/`git restore`, no `git stash drop`, no wholesale overwrites.
   If recovery is unclear, stop and ask.

@@ -26,15 +26,10 @@ agents read them themselves.
 
 - Scope: the argument wins; otherwise detect as review-as-team step 2 does
   (uncommitted / all unpushed / PR / full branch).
-- Models and effort, never asked:
-  - The learnings, team and claude reviewer agents run with `model: "fable"`
-    and `effort: "xhigh"`. A Claude model named in the arguments (`fable`,
-    `opus`, `sonnet`, `haiku`) replaces `fable`.
-  - Codex runs `gpt-6-astra` at `xhigh` (review-as-codex step 4). A Codex model
-    named in the arguments (`astra`, `sol`, `luna`, `gpt-...`) replaces it, as
-    review-as-codex step 4 resolves it.
-  - An effort level named in the arguments (`low`, `medium`, `high`, `xhigh`,
-    `max`) replaces `xhigh` for all four passes.
+- Models and effort, never asked: the learnings, team and claude reviewer
+  agents use the model and effort review-as-team step 2 resolves from the
+  arguments, and Codex the ones review-as-codex step 4 resolves. An effort level
+  named in the arguments applies to all four passes.
 - Ensure threads have somewhere to land:
   `python3 ~/.claude/scripts/local-review-post.py ensure-review`
 - Check what the previous review left unfinished:
@@ -47,8 +42,6 @@ agents read them themselves.
     new review; a "no" stops here, so the user can finish them first with
     `/address-review`.
   - Scope (only if several scopes have content).
-  - Team learnings freshness (only if `team-learnings.md` is >30 days old:
-    Update via `/learn-from-prs` / Use current).
 - Archive the previous review. This moves every thread to the review's
   `archive/` directory and clears its Reviewed marks:
   `python3 ~/.claude/scripts/local-review-post.py archive`
@@ -58,19 +51,20 @@ agents read them themselves.
 The sub-skills invoked below must not re-ask any of these or rewrite the diff —
 enter them at the step noted.
 
-## 2. Codex first, in background
+## 2. Build the general review prompt
 
-Invoke `review-as-codex` with the chosen scope now — it is the slowest pass.
-Follow it through context gathering and prompt building (skip its scope
-detection), then launch its `codex exec` command (step-1 Codex model and effort)
-with `run_in_background` so
-step 3 proceeds while Codex works. Prefix the command with `SECONDS=0; ` and end
+Invoke `review-as-codex` with the chosen scope. Follow it through context
+gathering and prompt building (skip its scope detection) to get `$PROMPT`, but
+don't run `codex exec` yet: step 3 launches it with the other passes.
+
+## 3. All four passes in parallel
+
+Send all four in a single message:
+
+**Codex** — review-as-codex's `codex exec` command (step-1 Codex model and
+effort), with `run_in_background`. Prefix the command with `SECONDS=0; ` and end
 it with `; echo "codex took ${SECONDS}s"`, so it reports how long the pass ran
 (step 6); if Codex has to be rerun, add the two times.
-
-## 3. Learnings, team and claude passes in parallel
-
-Send all three in a single message:
 
 **Learnings agent** — one Agent call (`code-reviewer`, step-1 model and effort). Its prompt
 is this template, with `<diff>`, `<repo_root>` (`git rev-parse --show-toplevel`)
@@ -99,7 +93,7 @@ step-1 model and effort, the same `<diff>`), and collect its findings instead of
 letting it post.
 
 **Claude agent** — one Agent call (`code-reviewer`, step-1 model and effort) whose prompt
-is exactly the `$PROMPT` built for Codex in step 2, so both general reviewers
+is exactly the `$PROMPT` from step 2, so both general reviewers
 get the same scope, context and assumptions to distrust, and return the same
 JSON. It starts with none of this session's context, which is what makes it a
 second opinion rather than a re-read of Claude's own work.
@@ -108,27 +102,29 @@ second opinion rather than a re-read of Claude's own work.
 
 Merge the learnings and team results per review-as-team step 5 (same file/line
 + equivalent issue → one finding, union `flagged_by`), then post them per its
-step-6 Local PR Review mode. Author is `learnings` when only the learnings pass
-flagged it, with a body starting `"[<category>] (learnings: <rule>)\n\n<body>"`;
+step 6. Author is `learnings` when only the learnings pass flagged it, with a
+body starting `"[<category>] (learnings: <rule>)\n\n<body>"`;
 `team` otherwise. Give each finding `"passes"`: `"learnings"` when its
 `flagged_by` includes `learnings`, and `"team"` when it includes anyone else.
 Keep the `ids` that `post` prints (each finding's thread, in input order) for
 step 5.
 
-Hold the claude agent's findings until Codex finishes (step 5).
+Hold the claude and Codex findings until both are in and this step has posted
+(step 5 checks them against these threads).
 
 ## 5. Merge the general reviews
 
-When the background Codex run finishes, take its findings from review-as-codex
-step 5 and merge them with the claude agent's. Claude and Codex review
+Once the claude agent and Codex have both finished, take Codex's findings from
+review-as-codex step 5 and merge them with the claude agent's. Claude and Codex review
 independently, so a finding both raised is the strongest signal of the run:
 
 - A finding both raised (same file, overlapping lines, same issue) becomes one
   thread, authored `claude`, with a body starting
-  `"[<higher severity>] (claude, codex agree)\n\n<body>"`, the more concrete of
-  the two suggestions, and `"passes": ["claude", "codex"]`.
+  `"[<category>] (claude, codex agree)\n\n<body>"` (the higher-priority of the
+  two categories, per Guidelines), the more concrete of the two suggestions,
+  and `"passes": ["claude", "codex"]`.
 - Every other finding keeps its own reviewer as author, with a body starting
-  `"[<severity>] (<reviewer>)\n\n<body>"`.
+  `"[<category>] (<reviewer>)\n\n<body>"`.
 
 A finding equivalent to one posted in step 4 is not posted again; instead,
 record that its reviewers raised that thread too:
@@ -160,6 +156,9 @@ Archived 12 threads → <archive_file>
 - `time` is how long each pass ran: the `duration_ms` in its agent's completion
   notification (for the team pass, its reviewer agent's), and for Codex the time
   its command printed.
+- End the summary with the warning
+  `python3 ~/.claude/scripts/inject-learnings.py check` prints when
+  `my-learnings.md` is over the cap, if it prints one.
 
 Then remind: run **Local Review: Refresh**, go through To do (**Step through** in
 the Comments view), then `/address-review`. A pass returning zero findings is a

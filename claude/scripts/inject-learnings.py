@@ -11,8 +11,14 @@ Design constraints:
   - Fail-open: any error -> emit nothing, exit 0. Never delay or break session
     start, and never surface a stack trace into the user's session.
   - Headlines only, sorted by (seen Nx) count descending and capped at
-    MAX_BULLETS / MAX_CHARS so the injected context stays small; when the file
-    holds more, the highest-frequency rules survive.
+    MAX_BULLETS / MAX_CHARS so the injected context stays bounded; when the
+    file holds more, the highest-frequency rules survive.
+
+`inject-learnings.py check` prints a warning when the caps leave rules out, and
+nothing otherwise, for a caller to show once the user is reading: a warning at
+session start scrolls by before the user reads it, and the rules left out would
+vanish unnoticed. Unlike the hook, check fails loudly: a caller would read a
+check that failed silently as one with nothing to warn about.
 """
 
 import json
@@ -22,8 +28,11 @@ import sys
 
 from local_review_config import MY_LEARNINGS, load as load_config
 
-MAX_BULLETS = 30
-MAX_CHARS = 12000  # ~3k tokens; hard ceiling on injected size
+# We're injecting all of these into the session, so we want to prevent unbounded growth.
+MAX_BULLETS = 300
+# Room for MAX_BULLETS lines of a headline plus a lead of at most 120 chars, so
+# the bullet cap is the one that binds.
+MAX_CHARS = MAX_BULLETS * 250
 
 BULLET_RE = re.compile(r"\s*-\s+\*\*(.+?)\*\*\s*(.*)")
 
@@ -47,12 +56,10 @@ def _in_configured_repo(cwd, repos):
 
 def _digest():
     """The bold-headline rules (`- **Rule** — short`), sorted by (seen Nx)
-    count descending, capped. Each line is the rule plus a short lead of its
-    description; quotes and detail are dropped."""
-    try:
-        text = MY_LEARNINGS.read_text()
-    except Exception:
-        return ""
+    count descending, capped, and how many rules the caps left out. Each line
+    is the rule plus a short lead of its description; quotes and detail are
+    dropped."""
+    text = MY_LEARNINGS.read_text()
     bullets = []
     for line in text.splitlines():
         m = BULLET_RE.match(line)
@@ -69,15 +76,32 @@ def _digest():
             lead = after.split(". ")[0].split(" > ")[0][:120].strip()
         bullets.append((count, f"- {rule}" + (f": {lead}" if lead else "")))
     if not bullets:
-        return ""
+        return "", 0
     bullets.sort(key=lambda b: -b[0])  # stable: ties keep file order
     body = "\n".join(b for _, b in bullets[:MAX_BULLETS])
     if len(body) > MAX_CHARS:
         body = body[:MAX_CHARS].rsplit("\n", 1)[0]
-    return body
+    return body, len(bullets) - len(body.splitlines())
+
+
+def _check():
+    """Print a warning when the caps leave rules out of the digest."""
+    _, left_out = _digest()
+    if left_out:
+        print(
+            f"{MY_LEARNINGS} holds more than the session digest fits "
+            f"({MAX_BULLETS} rules, {MAX_CHARS} characters): its {left_out} "
+            "lowest-count rules are not injected."
+        )
+    return 0
 
 
 def main():
+    if sys.argv[1:] == ["check"]:
+        return _check()
+    if sys.argv[1:]:
+        print(f"usage: {sys.argv[0]} [check]", file=sys.stderr)
+        return 2
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -89,7 +113,7 @@ def main():
         return 0
     if not _in_configured_repo(cwd, repos):
         return 0
-    digest = _digest()
+    digest, _ = _digest()
     if not digest:
         return 0
     context = (
@@ -108,6 +132,9 @@ def main():
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        status = main()
     except BaseException:
-        sys.exit(0)
+        if sys.argv[1:]:  # only the hook, run with no arguments, fails open
+            raise
+        status = 0
+    sys.exit(status)

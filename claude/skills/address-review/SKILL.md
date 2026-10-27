@@ -169,23 +169,14 @@ Each **thread**:
    SessionStart hook injects its headlines into coding sessions). Running it after
    the report keeps the result fast — the user sees it first. **Don't make
    the user run anything; just do it.**
-   - Keep only what predicts *future* feedback: a naming rule, a structure/pattern
-     preference, a doc or test convention, a "don't do X". **Drop one-offs** (a typo
-     fix, a this-specific-value correction, anything that won't recur). **When in
-     doubt, drop** — the file predicts future feedback, it is not an archive. Skip threads
-     you pushed back on, and **never** distill `team`/`claude`/`codex`/`learnings` comments — the
-     file must stay *your* (the user's) standards. Also skip a rule your `CLAUDE.md` already states:
-     it is loaded in every session already.
-   - Read the file, then per kept preference (mirroring `/learn-from-prs`'s reduce
-     rules): reinforces an existing bullet → bump its `(seen Nx)` count (optionally a
-     fresh quote); genuinely new recurring → add `- **Rule** (seen 1x) — …` under the
-     right `## <theme>`; a notable single instance (soundness/security/novel
-     principle) → `(seen 1x, notable)`; noise → drop. **Write directly — don't ask
-     for approval.** Keep each bold headline self-contained (it's what the hook
-     injects) and the file tight. Then finish with one line per rule added or
-     bumped, quoting its headline and new `(seen Nx)` count, since the file is
-     injected into every session. If nothing this batch is generalizable, write
-     nothing and say nothing.
+   - Skip threads you pushed back on, and **never** distill
+     `team`/`claude`/`codex`/`learnings` comments — the file must stay *your*
+     (the user's) standards.
+   - Read the file, then record each comment by the rules in the `/learn` skill
+     (`~/.claude/skills/learn/SKILL.md`, "Rules for my-learnings.md"). **Write
+     directly — don't ask for approval.** If nothing this batch is
+     generalizable, write nothing and say nothing beyond the over-cap warning
+     those rules end the report with.
 
 ## Notes
 
