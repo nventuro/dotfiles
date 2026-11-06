@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+// Stands in for wt-remove in the server's tests, so that no test removes a
+// worktree or reaches GitHub.
+//
+// Appends { branch, cwd } to $FAKE_WT_REMOVE_DIR/calls.log as a JSON line,
+// waits while $FAKE_WT_REMOVE_DIR/hold exists, then fails with the contents of
+// $FAKE_WT_REMOVE_DIR/fail/<branch> as its stderr when that exists, or drops
+// the branch's worktree from the fake wt-status's snapshot, as removing it
+// would.
+import fs from "node:fs";
+import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+
+const dir = process.env.FAKE_WT_REMOVE_DIR;
+const statusDir = process.env.FAKE_WT_STATUS_DIR;
+if (!dir || !statusDir) {
+  console.error(
+    "fake-wt-remove: FAKE_WT_REMOVE_DIR or FAKE_WT_STATUS_DIR is not set",
+  );
+  process.exit(1);
+}
+const branch = process.argv[2];
+fs.appendFileSync(
+  path.join(dir, "calls.log"),
+  `${JSON.stringify({ branch, cwd: process.cwd() })}\n`,
+);
+const deadline = Date.now() + 30_000;
+while (fs.existsSync(path.join(dir, "hold"))) {
+  if (Date.now() > deadline) {
+    console.error("fake-wt-remove: never released");
+    process.exit(1);
+  }
+  await sleep(20);
+}
+const failFile = path.join(dir, "fail", branch);
+if (fs.existsSync(failFile)) {
+  process.stderr.write(fs.readFileSync(failFile));
+  process.exit(1);
+}
+const snapshotFile = path.join(statusDir, "snapshot.json");
+const snapshot = JSON.parse(fs.readFileSync(snapshotFile, "utf8"));
+snapshot.worktrees = snapshot.worktrees.filter((wt) => wt.branch !== branch);
+fs.writeFileSync(snapshotFile, JSON.stringify(snapshot));

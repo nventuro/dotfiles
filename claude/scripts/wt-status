@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Print, as JSON, the state of each linked worktree of a repo (every worktree
+# but the main checkout): its local changes, and for its branch's PR on GitHub,
+# whether CI passes, how the reviews stand and whether it merges cleanly. Also
+# list the open PRs in any repo on GitHub that request a review from gh's
+# account.
+#
+#   wt-status [-C <checkout>] [--remote <name>] [--check <name>]...
+#
+#   -C <checkout>    any checkout of the repo (default: the current directory)
+#   --remote <name>  the remote whose GitHub repo holds the PRs (default: origin)
+#   --check <name>   a check whose result decides CI; repeat it for several.
+#                    Without it, every check on the PR's head decides.
+#
+# Output:
+#
+#   { "repo": "<owner>/<name>",
+#     "worktrees": [{
+#       "path", "branch" (null when detached), "head",
+#       "dirty_files": count of uncommitted and untracked files, submodules aside,
+#       "dirty_submodules": paths of the submodules whose checkout differs from
+#                           what the branch records: another commit, or
+#                           uncommitted or untracked files of their own. A
+#                           submodule that was never initialised, an empty
+#                           directory, is in neither field,
+#       "pr": null when the branch has no PR, otherwise its open PR, or its
+#             newest one when none is open: {
+#         "number", "url", "title", "base", "draft", "head",
+#         "state": "open" | "closed" | "merged",
+#         "ahead": commits on the local branch that the PR lacks,
+#         "behind": commits on the PR that the local branch lacks,
+#         then these, which are null unless the PR is open:
+#         "mergeable": false when the PR conflicts with its base, null while
+#                      GitHub has yet to compute it,
+#         "ci": { "result": "pass" | "fail" | "pending" | "none",
+#                 "checks": [{ "name", "status", "conclusion", "url",
+#                              "failing" }] },
+#         "reviews": { "approved", "changes_requested", "commented",
+#                      "requested", "requested_teams",
+#                      "submitted": count of reviews submitted },
+#         "comments": count of comments in the PR's conversation,
+#         "review_comments": count of comments on the PR's diff,
+#         "review_threads": the threads of comments on the PR's diff, with the
+#                           author and url of each one's first comment:
+#                           [{ "resolved", "outdated", "path", "author", "url" }] } }],
+#     "review_requests": the open PRs in any repo that request a review from
+#                        gh's account itself, not from a team it is in, newest
+#                        first, with "repo" as <owner>/<name> and "head" as the
+#                        SHA of the PR's head commit:
+#                        [{ "repo", "number", "url", "title", "author", "created_at", "head" }] }
+#
+# CI comes from the latest run of each check; commit statuses are not read. A
+# check is "failing" when its latest run completed with any conclusion but
+# success, neutral or skipped, and a check named with --check that has no run
+# yet is pending. A reviewer's latest approval or change request stands until they
+# approve or request changes again; "commented" lists the reviewers who only
+# commented. "requested" lists the reviewers whose review is still requested.
+#
+# Each worktree costs one GitHub API request, or five when its PR is open, plus
+# one for each further page of a list past 100 entries. GitHub allows gh's
+# account 5,000 REST requests an hour, and the review threads' GraphQL query
+# spends a separate hourly limit. Listing the review requests costs one search
+# request per 100 PRs, from a separate limit of 30 a minute, plus one REST
+# request per PR for its head, which search results leave out.
+set -euo pipefail
+shopt -s inherit_errexit
+source "$(dirname "${BASH_SOURCE[0]}")/wt-lib.sh"
+
+usage="usage: wt-status [-C <checkout>] [--remote <name>] [--check <name>]..."
+checkout=.
+remote=origin
+checks=()
+while [[ $# -gt 0 ]]; do
+  [[ $# -ge 2 ]] || die "$usage"
+  case $1 in
+    -C) checkout=$2 ;;
+    --remote) remote=$2 ;;
+    --check) checks+=("$2") ;;
+    *) die "$usage" ;;
+  esac
+  shift 2
+done
+check_names=$(jq -nc '$ARGS.positional' --args -- "${checks[@]}")
+
+repo=$(github_repo "$checkout" "$remote")
+
+# One worktree per line, as <path> TAB <head> TAB <branch>, main checkout first.
+worktrees=$(git -C "$checkout" worktree list --porcelain | awk '
+  /^worktree / { path = substr($0, 10); head = ""; branch = "" }
+  /^HEAD / { head = substr($0, 6) }
+  /^branch refs\/heads\// { branch = substr($0, 19) }
+  /^$/ { print path "\t" head "\t" branch }')
+
+# The open PR's fields that need requests of their own: mergeable, ci, reviews,
+# comments, review_comments and review_threads.
+open_pr_state() {
+  local number=$1 head=$2 detail reviews runs threads
+  detail=$(github_api "repos/$repo/pulls/$number")
+  reviews=$(github_api "repos/$repo/pulls/$number/reviews" -f per_page=100 --paginate)
+  # One object per page, each with its own check_runs.
+  runs=$(github_api "repos/$repo/commits/$head/check-runs" -f filter=all -f per_page=100 --paginate --slurp)
+  # The REST API has no notion of a review thread or of its resolution.
+  threads=$(gh api graphql --paginate --slurp -f owner="${repo%%/*}" -f name="${repo#*/}" -F number="$number" -f query='
+    query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100, after: $endCursor) {
+            nodes { isResolved isOutdated path comments(first: 1) { nodes { author { __typename login } url } } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }') || die "GitHub API request failed: review threads of PR #$number"
+
+  jq -n --argjson detail "$detail" --argjson reviews "$reviews" --argjson runs "$runs" \
+    --argjson threads "$threads" --argjson names "$check_names" '
+    ([[$runs[].check_runs[]] | group_by(.name)[] | max_by(.id)
+      | select(($names | length) == 0 or (.name | IN($names[])))
+      | {name, status, conclusion, url: .html_url}]) as $latest
+    | ($latest + [($names - [$latest[].name])[] | {name: ., status: "missing", conclusion: null, url: null}]
+      | map(. + {failing: (.status == "completed" and (.conclusion | IN("success", "neutral", "skipped") | not))})) as $checks
+    | ([$reviews[] | select(.state | IN("APPROVED", "CHANGES_REQUESTED", "DISMISSED"))]
+      | group_by(.user.login) | map(max_by(.id))) as $verdicts
+    | {
+        mergeable: $detail.mergeable,
+        ci: {
+          result: (
+            if any($checks[]; .failing) then "fail"
+            elif any($checks[]; .status != "completed") then "pending"
+            elif ($checks | length) == 0 then "none"
+            else "pass" end),
+          checks: $checks
+        },
+        reviews: {
+          approved: [$verdicts[] | select(.state == "APPROVED") | .user.login],
+          changes_requested: [$verdicts[] | select(.state == "CHANGES_REQUESTED") | .user.login],
+          commented: (([$reviews[] | select(.state == "COMMENTED") | .user.login] | unique) - [$verdicts[].user.login]),
+          requested: [$detail.requested_reviewers[].login],
+          requested_teams: [$detail.requested_teams[].slug],
+          submitted: ($reviews | length)
+        },
+        comments: $detail.comments,
+        review_comments: $detail.review_comments,
+        review_threads: [$threads[].data.repository.pullRequest.reviewThreads.nodes[]
+          | .comments.nodes[0] as $first
+          # GraphQL leaves out the [bot] suffix that the logins in reviews carry.
+          | ($first.author | if .__typename == "Bot" then "\(.login)[bot]" else .login end) as $author
+          | {resolved: .isResolved, outdated: .isOutdated, path, author: $author, url: $first.url}]
+      }'
+}
+
+worktree_state() {
+  local path=$1 head=$2 branch=$3 dirty pr=null prs number pr_head ahead behind open
+  [[ -d $path ]] || die "worktree $path no longer exists; git worktree prune drops it"
+  # -z leaves paths unquoted, and ends a rename's entry with its original path
+  # as a field of its own. A submodule's entry carries an S in its third field.
+  dirty=$(git -C "$path" status --porcelain=v2 -z | jq -Rs '
+    reduce (split("\u0000")[:-1][]) as $field ({files: 0, submodules: [], orig_path: false};
+      if .orig_path then .orig_path = false
+      else ($field | split(" ")) as $f
+        | .orig_path = ($f[0] == "2")
+        # Headers, such as the stash count that status.showStash adds, are not entries.
+        | if $f[0] == "#" then .
+          elif ($f[0] | IN("1", "2", "u")) and ($f[2] | startswith("S")) then
+            .submodules += [$f[{"1": 8, "2": 9, "u": 10}[$f[0]]:] | join(" ")]
+          else .files += 1 end
+      end)
+    | {dirty_files: .files, dirty_submodules: .submodules}')
+
+  if [[ -n $branch ]]; then
+    prs=$(branch_prs "$repo" "$branch")
+    pr=$(jq 'first(.[] | select(.state == "open")) // first(.[]) // null' <<<"$prs")
+  fi
+  if [[ $pr != null ]]; then
+    number=$(jq -r .number <<<"$pr")
+    pr_head=$(jq -r .head.sha <<<"$pr")
+    # The PR's head may be a commit this clone never had, such as one pushed
+    # from elsewhere.
+    git_https -C "$path" fetch -q "$remote" "refs/pull/$number/head"
+    read -r ahead behind < <(git -C "$path" rev-list --left-right --count "$head...$pr_head")
+    open='{"mergeable": null, "ci": null, "reviews": null, "comments": null, "review_comments": null, "review_threads": null}'
+    if [[ $(jq -r .state <<<"$pr") == open ]]; then
+      open=$(open_pr_state "$number" "$pr_head")
+    fi
+    pr=$(jq -n --argjson pr "$pr" --argjson ahead "$ahead" --argjson behind "$behind" --argjson open "$open" '
+      {
+        number: $pr.number, url: $pr.html_url, title: $pr.title, base: $pr.base.ref,
+        draft: $pr.draft, head: $pr.head.sha,
+        state: (if $pr.merged_at then "merged" else $pr.state end),
+        ahead: $ahead, behind: $behind
+      } + $open')
+  fi
+
+  jq -n --arg path "$path" --arg head "$head" --arg branch "$branch" \
+    --argjson dirty "$dirty" --argjson pr "$pr" '
+    {path: $path, branch: (if $branch == "" then null else $branch end), head: $head} + $dirty + {pr: $pr}'
+}
+
+# Collected before printing, so that a failure prints nothing rather than a
+# partial list.
+states=$(tail -n +2 <<<"$worktrees" | while IFS=$'\t' read -r path head branch; do
+  worktree_state "$path" "$head" "$branch"
+done)
+search=$(github_api search/issues -f q="is:pr is:open user-review-requested:@me" \
+  -f sort=created -f order=desc -f per_page=100 --paginate --slurp)
+review_requests=$(jq -c '.[].items[] | {
+    repo: (.repository_url | sub("^https://api.github.com/repos/"; "")),
+    number, url: .html_url, title, author: .user.login, created_at
+  }' <<<"$search" | while IFS= read -r request; do
+  pull=$(github_api "$(jq -r '"repos/\(.repo)/pulls/\(.number)"' <<<"$request")")
+  jq -c --argjson pull "$pull" '. + {head: $pull.head.sha}' <<<"$request"
+done | jq -s .)
+jq -s --arg repo "$repo" --argjson requests "$review_requests" '{
+    repo: $repo,
+    worktrees: .,
+    review_requests: $requests
+  }' <<<"$states"

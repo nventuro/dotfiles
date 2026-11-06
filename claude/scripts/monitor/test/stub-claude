@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+// Stands in for `claude -p` in the server's tests, so that no test spends
+// tokens.
+//
+// Each invocation writes $STUB_CLAUDE_DIR/calls/<session id>.json with its
+// argv, cwd and the CI_* environment variables, then behaves as
+// $STUB_CLAUDE_DIR/behavior.json says for its --name (or "*"):
+//
+//   { "<name>": { "outcome": "success" | "exit" | "is_error" | "garbage",
+//                 "hold": true } }
+//
+// With "hold" it waits until $STUB_CLAUDE_DIR/release/<session id> exists.
+// On SIGTERM it writes $STUB_CLAUDE_DIR/terminated/<session id> and exits.
+import fs from "node:fs";
+import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+
+const dir = process.env.STUB_CLAUDE_DIR;
+if (!dir) {
+  console.error("stub-claude: STUB_CLAUDE_DIR is not set");
+  process.exit(1);
+}
+const argv = process.argv.slice(2);
+const option = (name) => {
+  const i = argv.indexOf(name);
+  return i === -1 ? null : argv[i + 1];
+};
+const sessionId = option("--session-id");
+const name = option("--name");
+for (const sub of ["calls", "release", "terminated"]) {
+  fs.mkdirSync(path.join(dir, sub), { recursive: true });
+}
+
+process.on("SIGTERM", () => {
+  fs.writeFileSync(path.join(dir, "terminated", sessionId), "");
+  process.exit(143);
+});
+
+fs.writeFileSync(
+  path.join(dir, "calls", `${sessionId}.json`),
+  JSON.stringify({
+    argv,
+    cwd: process.cwd(),
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key.startsWith("CI_")),
+    ),
+    started_at: new Date().toISOString(),
+  }),
+);
+
+let behaviors = {};
+try {
+  behaviors = JSON.parse(
+    fs.readFileSync(path.join(dir, "behavior.json"), "utf8"),
+  );
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
+const behavior = behaviors[name] ?? behaviors["*"] ?? {};
+
+if (behavior.hold) {
+  const release = path.join(dir, "release", sessionId);
+  const deadline = Date.now() + 30_000;
+  while (!fs.existsSync(release)) {
+    if (Date.now() > deadline) {
+      console.error(`stub-claude: ${name} was never released`);
+      process.exit(1);
+    }
+    await sleep(20);
+  }
+}
+
+switch (behavior.outcome ?? "success") {
+  case "success":
+    process.stdout.write(
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: `stub result for ${name}`,
+        session_id: sessionId,
+        total_cost_usd: 0.0034,
+        num_turns: 1,
+        terminal_reason: "completed",
+        permission_denials: [],
+      }),
+    );
+    break;
+  case "exit":
+    process.stderr.write("stub-claude: starting\nstub-claude: boom\n\n");
+    process.exit(2);
+    break;
+  case "is_error":
+    process.stdout.write(
+      JSON.stringify({
+        type: "result",
+        subtype: "error_max_budget_usd",
+        is_error: true,
+        session_id: sessionId,
+        total_cost_usd: 0.5,
+      }),
+    );
+    process.exit(1);
+    break;
+  case "garbage":
+    process.stdout.write("not json");
+    break;
+  default:
+    console.error(`stub-claude: unknown outcome ${behavior.outcome}`);
+    process.exit(1);
+}

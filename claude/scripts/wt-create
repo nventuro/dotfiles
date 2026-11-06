@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Create a worktree for a branch at .claude/worktrees/<branch> in the main
+# checkout, with its submodules initialised, and print its path.
+#
+#   wt-create <branch> <base>   a new branch <branch>, from origin/<base> as just fetched
+#   wt-create <branch>          an existing branch: the local one if there is one,
+#                               otherwise a new local branch tracking origin/<branch>
+#
+# Run it from the main checkout or any of its worktrees. Once the branch's PR is
+# merged, remove the worktree with wt-remove.
+set -euo pipefail
+shopt -s inherit_errexit
+source "$(dirname "${BASH_SOURCE[0]}")/wt-lib.sh"
+
+[[ $# -eq 1 || $# -eq 2 ]] || die "usage: wt-create <branch> [<base>]"
+branch=$1
+base=${2:-}
+git check-ref-format --branch "$branch" >/dev/null || die "not a valid branch name: $branch"
+
+main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+dir=$main/.claude/worktrees/$branch
+git -C "$main" check-ignore -q "$dir" ||
+  die "$main/.claude/worktrees is not gitignored, so the main checkout would see the worktrees as untracked files; add it to .gitignore or .git/info/exclude"
+
+if [[ -n $base ]]; then
+  git_https -C "$main" fetch origin "+refs/heads/$base:refs/remotes/origin/$base" >&2
+  git -C "$main" worktree add --no-track -b "$branch" "$dir" "origin/$base" >&2
+else
+  rc=0
+  git_https -C "$main" ls-remote --exit-code origin "refs/heads/$branch" >/dev/null || rc=$?
+  case $rc in
+    0) git_https -C "$main" fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" >&2 ;;
+    2) git -C "$main" rev-parse -q --verify "refs/heads/$branch" >/dev/null ||
+      die "no branch $branch locally or on origin; pass a base to create it" ;;
+    *) die "could not list origin's branches (git ls-remote exited with $rc)" ;;
+  esac
+  git -C "$main" worktree add "$dir" "$branch" >&2
+fi
+
+git_https -C "$dir" submodule update --init >&2
+echo "$dir"

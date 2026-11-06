@@ -1,0 +1,1252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>monitor</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #0F1115;
+  --panel: #151820;
+  --group: #12151B;
+  --border: #2B303B;
+  --divider: #20242C;
+  --text: #E4E7EC;
+  --soft: #C9CED6;
+  --muted: #9BA3AF;
+  --amber: #F5B83D;
+  --green: #4CC38A;
+  --red: #FF8A80;
+  --blue: #8FB0F8;
+  --violet: #B9A3FF;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Ligatures would turn the && and -> of copyable commands into glyphs. */
+  font-variant-ligatures: none;
+}
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+h1, h2, p, ul, dl, pre { margin: 0; }
+ul { padding: 0; list-style: none; }
+code, pre { font: inherit; }
+
+.amber { color: var(--amber); }
+.green { color: var(--green); }
+.red { color: var(--red); }
+.violet { color: var(--violet); }
+.blue { color: var(--blue); }
+.soft { color: var(--soft); }
+.muted { color: var(--muted); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+.wrap { max-width: 1440px; margin: 0 auto; padding: 16px 20px 48px; }
+
+.top {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.brand strong { font-weight: 600; }
+.brand .path { overflow-wrap: anywhere; }
+.counts { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.counts .n { font-weight: 600; }
+.counts .zero { color: var(--muted); }
+.fresh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-left: auto; }
+
+.notice { margin-top: 10px; overflow-wrap: anywhere; }
+
+.btn {
+  font: inherit; font-size: 12px; line-height: 18px;
+  color: var(--soft); background: transparent;
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0 7px; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { border-color: var(--muted); color: var(--text); }
+.btn[aria-disabled="true"] { cursor: progress; color: var(--muted); }
+.btn[data-flash="copied"] { color: var(--green); border-color: var(--green); }
+.btn[data-flash="copy blocked"] { color: var(--red); border-color: var(--red); }
+
+.err { color: var(--red); overflow-wrap: anywhere; }
+/* A removal's error can span several lines. */
+.multiline { white-space: pre-wrap; }
+
+section.sec { margin-top: 22px; }
+.sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.sec-h .muted { font-weight: 400; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+.scroll { overflow-x: auto; }
+.empty { padding: 12px; color: var(--muted); }
+
+table.list { width: 100%; border-collapse: collapse; min-width: 900px; }
+table.list th, table.list td { text-align: left; vertical-align: top; padding: 6px 12px; }
+table.list thead th { color: var(--muted); font-weight: 400; font-size: 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.list tr.ghead th { background: var(--group); font-weight: 400; border-top: 1px solid var(--border); border-bottom: 1px solid var(--divider); }
+table.list tbody:first-of-type tr.ghead th { border-top: 0; }
+table.list tr.row + tr.row td { border-top: 1px solid var(--divider); }
+.ghead-in {
+  /* Keeps the group's name in view while the table scrolls sideways at phone width. */
+  position: sticky; left: 12px;
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
+  max-width: calc(100vw - 58px);
+}
+.ghead-right { float: right; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin-left: 12px; }
+.gname { font-weight: 600; }
+.gcount { color: var(--muted); }
+.gmean { color: var(--muted); }
+
+td.c-pr { white-space: nowrap; width: 1%; }
+td.c-branch { min-width: 220px; }
+td.c-base { white-space: nowrap; width: 1%; color: var(--soft); }
+td.c-why { min-width: 220px; color: var(--soft); }
+td.c-next { min-width: 280px; }
+td.c-title { min-width: 280px; }
+td.c-author, td.c-asked, td.c-state { white-space: nowrap; width: 1%; }
+td .repo-name { margin-left: 6px; }
+a.branch { overflow-wrap: anywhere; }
+.badges { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: baseline; }
+.badge {
+  font-size: 11px; line-height: 16px; padding: 0 5px;
+  border: 1px solid var(--border); border-radius: 3px; color: var(--soft); white-space: nowrap;
+}
+.line + .line { margin-top: 3px; }
+.line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.rk { color: var(--muted); }
+.chip {
+  display: inline-block; font-size: 12px; line-height: 18px; padding: 0 7px;
+  border: 1px solid currentColor; border-radius: 3px; white-space: nowrap;
+}
+tr.rowerr td { color: var(--red); }
+
+.crumb { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 14px; color: var(--muted); }
+.crumb .cur { color: var(--soft); overflow-wrap: anywhere; }
+.dhead { margin-top: 12px; }
+.dhead h1 { font-size: 16px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.dhead h1:focus { outline: none; }
+.dmeta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 6px; color: var(--soft); }
+.dmeta .flow { overflow-wrap: anywhere; }
+.dgrid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; margin-top: 16px; align-items: start; }
+.dmain, .dside { display: grid; gap: 16px; min-width: 0; }
+.dpanel { padding: 12px 14px; min-width: 0; }
+.dpanel > h2 { font-size: 12px; font-weight: 400; color: var(--muted); margin-bottom: 8px; }
+.conds > li { display: flex; gap: 10px; }
+.conds > li + li { margin-top: 3px; }
+.conds .mark { flex: none; width: 1ch; text-align: center; }
+.conds .ctext { min-width: 0; overflow-wrap: anywhere; }
+.conds .sub { margin-top: 2px; }
+.conds .sub li { color: var(--soft); }
+.conds .sub li::before { content: "– "; color: var(--muted); }
+.rblock + .rblock { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--divider); }
+.rhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.rname { font-weight: 600; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; margin-top: 8px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; color: var(--soft); overflow-wrap: anywhere; }
+.kv dd .badge { margin-right: 4px; }
+.dside .kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.dside .kv dd + dt { margin-top: 6px; }
+pre.result {
+  margin-top: 10px; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--divider); border-radius: 3px;
+  color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.cmd {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; padding: 6px 10px;
+  background: var(--bg); border: 1px solid var(--divider); border-radius: 3px;
+}
+.cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 10px; }
+.next > li + li { margin-top: 10px; }
+.next p { overflow-wrap: anywhere; }
+.links li + li { margin-top: 3px; }
+.message { max-width: 640px; margin: 18vh auto 0; }
+.message h1 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.message p + p { margin-top: 8px; }
+
+@media (max-width: 860px) {
+  .dgrid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .wrap { padding: 12px 16px 40px; }
+  .fresh { margin-left: 0; }
+  .ghead-in { max-width: calc(100vw - 54px); }
+}
+</style>
+</head>
+<body>
+<main id="app" class="wrap"><noscript>monitor needs JavaScript.</noscript></main>
+<div id="announce" class="sr-only" aria-live="polite"></div>
+<script>
+'use strict';
+/*
+ * URL fragment: #token=<token>[&item=<item>]
+ *
+ *   token  the server's access token, sent as a Bearer token on every /api/* call
+ *   item   the detail view to show instead of the list:
+ *            worktree:<branch>   a worktree (a detached one: worktree:<its path>)
+ *            request:<number>    a review request
+ *
+ * Links keep the token in the fragment so reloads and new tabs work. The token is
+ * also kept in sessionStorage, so a fragment edited by hand without it still works.
+ */
+
+const POLL_MS = 10000;
+const FLASH_MS = 1600;
+const TOKEN_KEY = 'monitor-token';
+const OLDER_KEY = 'monitor-older-open';
+
+const WORKTREE_STATES = {
+  needs: { label: 'needs you', cls: 'amber', meaning: 'CI fails, reviewers left feedback, or the PR conflicts with its base' },
+  ready: { label: 'ready to merge', cls: 'green', meaning: 'approved, CI passes, merges cleanly' },
+  waiting: { label: 'waiting', cls: 'soft', meaning: 'on CI, on reviewers, or on GitHub computing mergeability' },
+  local: { label: 'local', cls: 'muted', meaning: 'no PR yet, or a draft' },
+  done: { label: 'done', cls: 'violet', meaning: 'PR merged or closed' },
+};
+const REQUEST_STATES = {
+  new: { label: 'new', cls: 'soft' },
+  researched: { label: 'researched', cls: 'green' },
+  outdated: { label: 'outdated', cls: 'amber' },
+};
+
+const app = document.getElementById('app');
+
+let token = null;
+let route = { item: null };
+let state = null;
+let stateJson = '';
+let loadError = null;
+let authError = false;
+let refreshing = false;
+let refreshError = null;
+let removing = false;
+let removeError = null;
+// Branch -> why the last removal left its worktree.
+let removeFailures = new Map();
+let olderOpen = storageGet(OLDER_KEY) === '1';
+let listScrollY = 0;
+let pollTimer = null;
+// Research key -> { pending } while its POST is in flight, or { error, status }
+// after it failed; the error shows until the research's status moves on.
+const actions = new Map();
+// data-k of a copy button -> { label, timer } while its label flashes.
+const flashes = new Map();
+
+function storageGet(key) {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+function storageSet(key, value) {
+  try { sessionStorage.setItem(key, value); } catch { /* the page works without it */ }
+}
+
+function readHash() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const hashToken = params.get('token');
+  if (hashToken && hashToken !== token) {
+    token = hashToken;
+    storageSet(TOKEN_KEY, token);
+    authError = false;
+    stateJson = '';
+  }
+  if (!token) token = storageGet(TOKEN_KEY);
+  route = { item: params.get('item') };
+}
+
+function href(item) {
+  let s = '#token=' + encodeURIComponent(token ?? '');
+  if (item) s += '&item=' + encodeURIComponent(item).replace(/%3A/gi, ':').replace(/%2F/gi, '/');
+  return s;
+}
+
+function worktreeId(w) {
+  return w.branch ?? w.path;
+}
+
+// Strings from the API only ever become text nodes or attribute values here,
+// never markup.
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props ?? {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : String(v));
+  }
+  add(el, kids);
+  return el;
+}
+
+function add(el, kids) {
+  for (const kid of [kids].flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : String(kid));
+  }
+  return el;
+}
+
+function byKey(k) {
+  return document.querySelector(`[data-k="${CSS.escape(k)}"]`);
+}
+
+function safeUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function extLink(url, label, props) {
+  const safe = safeUrl(url);
+  if (!safe) return h('span', { title: `not an http(s) link: ${url}` }, label);
+  return h('a', { href: safe, target: '_blank', rel: 'noopener noreferrer', ...props }, label);
+}
+
+function dash() {
+  return h('span', { class: 'muted' }, '—');
+}
+
+function chip(label, cls) {
+  return h('span', { class: `chip ${cls}` }, label);
+}
+
+function badgeList(badges) {
+  if (!badges.length) return null;
+  // The leading space separates the badges from the branch, and collapses when they wrap.
+  return [' ', h('span', { class: 'badges' }, badges.map((b) => h('span', { class: 'badge' }, b)))];
+}
+
+function announce(text) {
+  const el = document.getElementById('announce');
+  el.textContent = '';
+  requestAnimationFrame(() => { el.textContent = text; });
+}
+
+function parseTime(iso, what) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) throw new Error(`${what} is not a timestamp: ${JSON.stringify(iso)}`);
+  return t;
+}
+
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+  const hr = Math.floor(m / 60);
+  return `${hr}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
+function fmtAgo(t) {
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 45) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const hr = Math.round(m / 60);
+  if (hr < 48) return `${hr}h ago`;
+  return `${Math.round(hr / 24)}d ago`;
+}
+
+function fmtClock(t) {
+  return new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDate(t) {
+  const d = new Date(t);
+  const opts = { month: 'short', day: 'numeric' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString(undefined, opts);
+}
+
+function fmtDateTime(t) {
+  return `${fmtDate(t)} ${fmtClock(t)}`;
+}
+
+function agoSpan(t) {
+  return h('span', { 'data-ago': t }, fmtAgo(t));
+}
+
+function elapsedSpan(r) {
+  if (!r.started_at) throw new Error(`research ${r.key} is running without started_at`);
+  const t = parseTime(r.started_at, `started_at of research ${r.key}`);
+  return h('span', { 'data-since': t }, fmtDuration(Date.now() - t));
+}
+
+function tick() {
+  for (const el of document.querySelectorAll('[data-since]')) {
+    el.textContent = fmtDuration(Date.now() - Number(el.dataset.since));
+  }
+  for (const el of document.querySelectorAll('[data-ago]')) {
+    el.textContent = fmtAgo(Number(el.dataset.ago));
+  }
+}
+
+function fmtCost(usd) {
+  return '$' + (usd >= 0.01 || usd === 0 ? usd.toFixed(2) : usd.toPrecision(2));
+}
+
+class AuthError extends Error {}
+
+async function api(method, path, body) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  let res;
+  try {
+    res = await fetch(path, { method, headers, cache: 'no-store', body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (e) {
+    throw new Error(`cannot reach the monitor server (${e.message})`);
+  }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* reported below */ }
+  if (res.status === 401) {
+    authError = true;
+    clearTimeout(pollTimer);
+    render();
+    throw new AuthError(`${method} ${path}: token rejected`);
+  }
+  if (!res.ok) {
+    const why = data && typeof data.error === 'string' ? data.error : text.trim().slice(0, 200) || res.statusText;
+    throw new Error(`${why} (${res.status})`);
+  }
+  if (data === null) throw new Error(`${method} ${path} answered ${res.status} without a JSON body`);
+  return data;
+}
+
+async function load() {
+  if (!token || authError) return;
+  let changed = false;
+  try {
+    const s = await api('GET', '/api/state');
+    const json = JSON.stringify(s);
+    if (json !== stateJson) {
+      stateJson = json;
+      state = s;
+      changed = true;
+    }
+    if (loadError) changed = true;
+    loadError = null;
+  } catch (e) {
+    if (e instanceof AuthError) return;
+    if (e.message !== loadError) changed = true;
+    loadError = e.message;
+  }
+  if (changed) render();
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (authError || !token) return;
+  pollTimer = setTimeout(async () => {
+    await load();
+    schedulePoll();
+  }, POLL_MS);
+}
+
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  refreshError = null;
+  render();
+  try {
+    await api('POST', '/api/refresh');
+  } catch (e) {
+    if (e instanceof AuthError) return;
+    refreshError = e.message;
+  } finally {
+    refreshing = false;
+  }
+  await load();
+  render();
+}
+
+async function removeMerged() {
+  if (removing) return;
+  removing = true;
+  removeError = null;
+  removeFailures = new Map();
+  render();
+  try {
+    const { removed, failed } = await api('POST', '/api/remove-merged');
+    removeFailures = new Map(failed.map((f) => [f.branch, f.error]));
+    announce(`removed ${removed.length} worktrees; ${failed.length} left`);
+  } catch (e) {
+    if (e instanceof AuthError) return;
+    removeError = e.message;
+  } finally {
+    removing = false;
+  }
+  await load();
+  render();
+}
+
+async function startResearch(key, status) {
+  if (actions.get(key)?.pending) return;
+  actions.set(key, { pending: true });
+  render();
+  try {
+    await api('POST', '/api/research', { key });
+    actions.delete(key);
+    announce(`research ${key} started`);
+  } catch (e) {
+    if (e instanceof AuthError) return;
+    actions.set(key, { error: e.message, status });
+    announce(`research ${key} failed to start: ${e.message}`);
+  }
+  await load();
+  render();
+}
+
+async function copy(k, text) {
+  let label;
+  try {
+    await navigator.clipboard.writeText(text);
+    label = 'copied';
+  } catch {
+    label = 'copy blocked';
+  }
+  clearTimeout(flashes.get(k)?.timer);
+  const timer = setTimeout(() => {
+    flashes.delete(k);
+    const b = byKey(k);
+    if (b) {
+      b.textContent = b.dataset.label;
+      b.removeAttribute('data-flash');
+    }
+  }, FLASH_MS);
+  flashes.set(k, { label, timer });
+  const b = byKey(k);
+  if (b) {
+    b.textContent = label;
+    b.dataset.flash = label;
+  }
+  announce(label === 'copied' ? 'copied to the clipboard' : 'the browser blocked copying to the clipboard');
+}
+
+function copyButton(k, label, text) {
+  const flash = flashes.get(k)?.label;
+  return h('button', {
+    type: 'button', class: 'btn', 'data-k': k, 'data-label': label, 'data-flash': flash,
+    title: text, onclick: () => copy(k, text),
+  }, flash ?? label);
+}
+
+function researchButton(key, label, r) {
+  const pending = actions.get(key)?.pending;
+  return h('button', {
+    type: 'button', class: 'btn', 'data-k': `research:${key}`, 'aria-disabled': pending ? 'true' : null,
+    onclick: () => startResearch(key, r?.status ?? null),
+  }, pending ? 'starting…' : label);
+}
+
+function actionError(key, r) {
+  const a = actions.get(key);
+  if (!a || a.pending) return null;
+  if ((r?.status ?? null) !== a.status) {
+    actions.delete(key);
+    return null;
+  }
+  return h('span', { class: 'err', role: 'alert' }, `✗ ${a.error}`);
+}
+
+function researchStatus(r) {
+  if (!r) return h('span', { class: 'muted' }, '· not started');
+  switch (r.status) {
+    case 'queued': return h('span', { class: 'amber' }, '◌ queued');
+    case 'running': return h('span', { class: 'amber' }, '◌ researching · ', elapsedSpan(r));
+    case 'done': return h('span', { class: 'green' }, '● done');
+    case 'failed':
+      if (!r.reason) throw new Error(`research ${r.key} failed without a reason`);
+      return h('span', { class: 'red' }, `✗ failed: ${r.reason}`);
+    default: throw new Error(`research ${r.key} has unknown status ${JSON.stringify(r.status)}`);
+  }
+}
+
+// The button a research offers in the list: start it, retry a failure, or
+// re-run it on a head that moved.
+function listResearchButton(key, r) {
+  if (!r) return researchButton(key, 'research', r);
+  if (r.status === 'failed') return researchButton(key, 'retry', r);
+  if (r.stale) return researchButton(key, 're-run', r);
+  return null;
+}
+
+function researchLine(r, key, prefix) {
+  return h('div', { class: 'line' },
+    prefix && h('span', { class: 'rk' }, prefix),
+    researchStatus(r),
+    r?.resume_command && copyButton(`copy:resume:${key}`, 'copy resume', r.resume_command),
+    listResearchButton(key, r),
+    actionError(key, r));
+}
+
+function failingChecks(pr) {
+  return pr.checks.filter((c) => c.failing);
+}
+
+function unfinishedChecks(pr) {
+  return pr.checks.filter((c) => c.status !== 'completed');
+}
+
+function list(names) {
+  return names.join(', ');
+}
+
+// The other worktree whose branch this worktree's PR is based on, when that
+// worktree has a PR: the PR is stacked on it.
+function stackedOn(w) {
+  if (!w.pr) return null;
+  const base = state.worktrees.find((o) => o !== w && o.branch === w.pr.base);
+  return base?.pr ? base : null;
+}
+
+function worktreeState(w) {
+  const meta = WORKTREE_STATES[w.state];
+  if (!meta) throw new Error(`worktree ${worktreeId(w)} has unknown state ${JSON.stringify(w.state)}`);
+  return meta;
+}
+
+function requestState(r) {
+  const meta = REQUEST_STATES[r.state];
+  if (!meta) throw new Error(`review request #${r.number} has unknown state ${JSON.stringify(r.state)}`);
+  return meta;
+}
+
+function allResearch() {
+  return [
+    ...state.worktrees.flatMap((w) => w.triggers.map((t) => t.research)),
+    ...state.review_requests.map((r) => r.research),
+  ].filter(Boolean);
+}
+
+function renderTop() {
+  const s = state;
+  const top = h('header', { class: 'top' },
+    h('div', { class: 'brand' },
+      h('strong', null, 'monitor'),
+      s && h('span', null, s.repo),
+      s && h('span', { class: 'muted path' }, s.checkout)));
+  if (s) {
+    const needs = s.worktrees.filter((w) => w.state === 'needs').length;
+    const done = allResearch().filter((r) => r.status === 'done').length;
+    const count = (n, label, cls, title) =>
+      h('span', { class: n ? '' : 'zero', title }, h('span', { class: `n ${n ? cls : ''}` }, n), ` ${label}`);
+    top.append(h('div', { class: 'counts' },
+      count(needs, 'needs you', 'amber'),
+      count(s.running, 'researching', 'amber', `at most ${s.max_running} run at once`),
+      count(s.queued, 'queued', 'amber'),
+      count(done, 'done', 'green')));
+  }
+  const fresh = h('div', { class: 'fresh' });
+  if (s) {
+    if (s.fetching) fresh.append(h('span', { class: 'amber' }, 'fetching from GitHub…'));
+    if (s.fetched_at) {
+      const t = parseTime(s.fetched_at, 'fetched_at');
+      fresh.append(h('span', { class: 'muted', title: new Date(t).toString() }, `refreshed ${fmtClock(t)} · `, agoSpan(t)));
+    } else if (!s.fetching) {
+      fresh.append(h('span', { class: 'muted' }, 'no snapshot yet'));
+    }
+    if (s.next_fetch_at) {
+      fresh.append(h('span', { class: 'muted' }, `next ${fmtClock(parseTime(s.next_fetch_at, 'next_fetch_at'))}`));
+    }
+  }
+  fresh.append(h('button', {
+    type: 'button', class: 'btn', 'data-k': 'refresh', 'aria-disabled': refreshing ? 'true' : null, onclick: refresh,
+  }, refreshing ? 'refreshing…' : 'refresh'));
+  if (refreshError) fresh.append(h('span', { class: 'err', role: 'alert' }, `✗ refresh failed: ${refreshError}`));
+  top.append(fresh);
+  return top;
+}
+
+function renderNotices() {
+  const out = [];
+  if (loadError) {
+    out.push(h('p', { class: 'notice err', role: 'alert' },
+      `✗ ${loadError}`, state ? ' — showing the last state it sent' : ''));
+  }
+  if (state?.error) {
+    out.push(h('p', { class: 'notice err' },
+      `✗ wt-status failed: ${state.error}`,
+      state.fetched_at
+        ? ` — showing the snapshot from ${fmtDateTime(parseTime(state.fetched_at, 'fetched_at'))}`
+        : ' — no snapshot yet'));
+  }
+  return out;
+}
+
+function scrollBox(k, table) {
+  return h('div', { class: 'panel' }, h('div', { class: 'scroll', 'data-k': `scroll:${k}` }, table));
+}
+
+// `extra` follows the group's meaning; `right` sits at the row's right end.
+function groupHeader(cols, name, cls, count, meaning, { extra = null, right = null } = {}) {
+  return h('tr', { class: 'ghead' }, h('th', { colspan: cols, scope: 'colgroup' },
+    right && h('span', { class: 'ghead-right' }, right),
+    h('span', { class: 'ghead-in' },
+      h('span', { class: `gname ${cls}` }, name),
+      h('span', { class: 'gcount' }, count),
+      h('span', { class: 'gmean' }, meaning),
+      extra)));
+}
+
+// A row that cannot be shown becomes an error row, so one bad entry does not
+// take the rest of the page down with it.
+function guardedRow(cols, what, build) {
+  try {
+    return build();
+  } catch (e) {
+    console.error(e);
+    return h('tr', { class: 'row rowerr' }, h('td', { colspan: cols }, `✗ cannot show ${what}: ${e.message}`));
+  }
+}
+
+function headRow(names) {
+  return h('thead', null, h('tr', null, names.map((n) => h('th', { scope: 'col' }, n))));
+}
+
+function renderList() {
+  const s = state;
+  return [
+    h('section', { class: 'sec', 'aria-labelledby': 'sec-wt' },
+      h('h2', { class: 'sec-h', id: 'sec-wt' }, 'worktrees', h('span', { class: 'muted' }, s.worktrees.length)),
+      worktreeTable()),
+    h('section', { class: 'sec', 'aria-labelledby': 'sec-rr' },
+      h('h2', { class: 'sec-h', id: 'sec-rr' }, 'review requests', h('span', { class: 'muted' }, s.review_requests.length)),
+      requestTable()),
+  ];
+}
+
+function worktreeTable() {
+  const ws = state.worktrees;
+  if (!ws.length) {
+    return h('div', { class: 'panel' }, h('p', { class: 'empty' },
+      state.fetched_at ? 'No linked worktrees.' : 'Waiting for the first wt-status run.'));
+  }
+  ws.forEach(worktreeState);
+  const table = h('table', { class: 'list' }, headRow(['pr', 'branch', 'base', 'why', 'research / next']));
+  for (const [name, meta] of Object.entries(WORKTREE_STATES)) {
+    const rows = ws.filter((w) => w.state === name);
+    if (!rows.length) continue;
+    const right = name === 'done' ? removeMergedControl(rows) : null;
+    table.append(h('tbody', null,
+      groupHeader(5, meta.label, meta.cls, rows.length, meta.meaning, { right }),
+      rows.map((w) => guardedRow(5, `worktree ${worktreeId(w)}`, () => worktreeRow(w)))));
+  }
+  return scrollBox('worktrees', table);
+}
+
+// The done group's button that removes every merged worktree, or null when
+// none of them has a merged PR.
+function removeMergedControl(rows) {
+  if (!rows.some((w) => w.remove_command)) return null;
+  return [
+    removeError && h('span', { class: 'err', role: 'alert' }, `✗ ${removeError}`),
+    h('button', {
+      type: 'button', class: 'btn', 'data-k': 'remove-merged', 'aria-disabled': removing ? 'true' : null,
+      onclick: removeMerged,
+    }, removing ? 'deleting…' : 'delete local worktree and branch'),
+  ];
+}
+
+function worktreeRow(w) {
+  const pr = w.pr;
+  const id = worktreeId(w);
+  const base = stackedOn(w);
+  return h('tr', { class: 'row' },
+    h('td', { class: 'c-pr' }, pr ? extLink(pr.url, `#${pr.number}`, { title: pr.title }) : dash()),
+    h('td', { class: 'c-branch' },
+      h('a', { class: 'branch', href: href(`worktree:${id}`), 'data-k': `open:worktree:${id}` }, w.branch ?? `(detached) ${w.path}`),
+      badgeList(w.badges)),
+    h('td', { class: 'c-base' },
+      !pr ? dash()
+        : base ? h('a', { href: href(`worktree:${base.branch}`), title: `stacked on ${pr.base}` }, `#${base.pr.number}`)
+          : pr.base),
+    h('td', { class: 'c-why' }, worktreeWhy(w)),
+    h('td', { class: 'c-next' }, worktreeNextCell(w, base)));
+}
+
+function worktreeWhy(w) {
+  const pr = w.pr;
+  switch (w.state) {
+    case 'needs': {
+      const parts = [];
+      for (const t of w.triggers) {
+        if (parts.length) parts.push(h('span', { class: 'muted' }, ' · '));
+        parts.push(h('span', { class: t.kind === 'ci-failure' ? 'red' : 'amber' }, t.detail));
+      }
+      if (!parts.length) throw new Error(`worktree ${worktreeId(w)} needs you without a trigger`);
+      return parts;
+    }
+    case 'ready':
+      return `approved by ${list(pr.approved)}`;
+    case 'waiting': {
+      const parts = [];
+      if (pr.ci_result === 'pending') parts.push('CI running');
+      else if (pr.ci_result === 'none') parts.push('no CI checks');
+      if (!pr.approved.length) parts.push(pr.requested.length ? `review requested from ${list(pr.requested)}` : 'no approval yet');
+      if (pr.mergeable === null) parts.push('mergeability not computed yet');
+      return parts.join(' · ');
+    }
+    case 'local':
+      return pr ? 'draft' : 'no PR';
+    case 'done':
+      return pr.state === 'merged' ? 'PR merged' : 'PR closed';
+  }
+  throw new Error(`worktree ${worktreeId(w)} has unknown state ${JSON.stringify(w.state)}`);
+}
+
+function worktreeNextCell(w, base) {
+  const lines = [];
+  for (const t of w.triggers) lines.push(researchLine(t.research, t.key, t.kind));
+  if (w.state === 'ready') {
+    lines.push(base && base.pr.state === 'open'
+      ? h('div', { class: 'line muted' }, `after #${base.pr.number} merges`)
+      : h('div', { class: 'line' }, extLink(w.pr.url, 'merge ↗')));
+  }
+  const removeFailure = removeFailures.get(w.branch);
+  if (removeFailure) lines.push(h('div', { class: 'line err multiline' }, `✗ not removed: ${removeFailure}`));
+  return lines.length ? lines : dash();
+}
+
+function requestTable() {
+  const rs = state.review_requests;
+  if (!rs.length) return h('div', { class: 'panel' }, h('p', { class: 'empty' }, 'No open review requests in this repo.'));
+  const repoName = state.repo.split('/').pop();
+  const table = h('table', { class: 'list' }, headRow(['pr', 'title', 'author', 'asked', 'state', 'research']));
+  const recent = rs.filter((r) => r.recent);
+  const older = rs.filter((r) => !r.recent);
+  const rows = (group) => group.map((r) => guardedRow(6, `review request #${r.number}`, () => requestRow(r, repoName)));
+  if (recent.length) {
+    table.append(h('tbody', null,
+      groupHeader(6, `last ${state.recent_days} days`, 'amber', recent.length, 'researched on arrival'),
+      rows(recent)));
+  }
+  if (older.length) {
+    const toggle = h('button', {
+      type: 'button', class: 'btn', 'data-k': 'toggle-older', 'aria-expanded': String(olderOpen), 'aria-controls': 'older-rows',
+      onclick: () => {
+        olderOpen = !olderOpen;
+        storageSet(OLDER_KEY, olderOpen ? '1' : '0');
+        render();
+      },
+    }, olderOpen ? 'hide' : 'show');
+    table.append(
+      h('tbody', null, groupHeader(6, 'older', 'soft', older.length, 'research on request', { extra: toggle })),
+      h('tbody', { id: 'older-rows', hidden: !olderOpen }, rows(older)));
+  }
+  return scrollBox('requests', table);
+}
+
+function requestRow(r, repoName) {
+  const meta = requestState(r);
+  const asked = parseTime(r.created_at, `created_at of review request #${r.number}`);
+  return h('tr', { class: 'row' },
+    h('td', { class: 'c-pr' }, extLink(r.url, `#${r.number}`), h('span', { class: 'muted repo-name' }, repoName)),
+    h('td', { class: 'c-title' }, h('a', { href: href(`request:${r.number}`), 'data-k': `open:request:${r.number}` }, r.title)),
+    h('td', { class: 'c-author soft' }, r.author),
+    h('td', { class: 'c-asked soft', title: new Date(asked).toString() }, fmtDate(asked)),
+    h('td', { class: 'c-state' }, chip(meta.label, meta.cls)),
+    h('td', { class: 'c-next' }, researchLine(r.research, r.key, null)));
+}
+
+function renderDetail(item) {
+  if (item.startsWith('worktree:')) {
+    const id = item.slice('worktree:'.length);
+    const w = state.worktrees.find((x) => worktreeId(x) === id);
+    return w ? worktreeDetail(w) : missing('worktrees', id, `No worktree ${id} in the current state.`);
+  }
+  if (item.startsWith('request:')) {
+    const n = item.slice('request:'.length);
+    const r = state.review_requests.find((x) => String(x.number) === n);
+    return r ? requestDetail(r) : missing('review requests', `#${n}`, `No open review request #${n} in the current state.`);
+  }
+  return missing(null, item, `The URL names an item this page does not know: ${JSON.stringify(item)}.`);
+}
+
+function crumb(group, current) {
+  return h('nav', { class: 'crumb', 'aria-label': 'breadcrumb' },
+    h('a', { href: href(null), 'data-k': 'back' }, '← monitor'),
+    group && [h('span', { 'aria-hidden': 'true' }, '/'), h('span', null, group)],
+    h('span', { 'aria-hidden': 'true' }, '/'),
+    h('span', { class: 'cur', 'aria-current': 'page' }, current));
+}
+
+function missing(group, current, text) {
+  return [crumb(group, current), h('p', { class: 'notice muted' }, text)];
+}
+
+function panel(title, ...body) {
+  return h('section', { class: 'panel dpanel' }, h('h2', null, title), body);
+}
+
+const MARKS = {
+  '✓': { cls: 'green', sr: 'ok' },
+  '!': { cls: 'amber', sr: 'attention' },
+  '·': { cls: 'muted', sr: 'note' },
+  '◌': { cls: 'amber', sr: 'in progress' },
+};
+
+function conds(items) {
+  return h('ul', { class: 'conds' }, items.map((c) => {
+    const mark = MARKS[c.mark];
+    return h('li', null,
+      h('span', { class: `mark ${c.cls ?? mark.cls}`, 'aria-hidden': 'true' }, c.mark),
+      h('span', { class: 'ctext' },
+        h('span', { class: 'sr-only' }, `${mark.sr}: `),
+        c.text,
+        c.sub?.length ? h('ul', { class: 'sub' }, c.sub.map((s) => h('li', null, s))) : null));
+  }));
+}
+
+function kv(rows) {
+  return h('dl', { class: 'kv' }, rows.filter(Boolean).map(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
+}
+
+function cmdRow(k, text) {
+  return h('div', { class: 'cmd' }, h('code', null, text), copyButton(k, 'copy', text));
+}
+
+function nextList(items) {
+  return h('ul', { class: 'next' }, items.map((n) => h('li', null,
+    h('p', null, n.text, n.link && [' ', extLink(n.link.url, n.link.label)]),
+    n.cmd && cmdRow(n.cmd.k, n.cmd.text))));
+}
+
+function linksPanel(url) {
+  if (!url) return panel('links', h('p', { class: 'muted' }, 'no PR'));
+  return panel('links', h('ul', { class: 'links' },
+    h('li', null, extLink(url, 'PR ↗')),
+    h('li', null, extLink(`${url}/files`, 'files ↗')),
+    h('li', null, extLink(`${url}/checks`, 'checks ↗'))));
+}
+
+function researchBlock(r, key, name) {
+  const blk = h('div', { class: 'rblock' },
+    h('div', { class: 'rhead' }, h('span', { class: 'rname' }, name), researchStatus(r)));
+  if (r) {
+    const at = (field) => (r[field] ? parseTime(r[field], `${field} of research ${r.key}`) : null);
+    const started = at('started_at');
+    const finished = at('finished_at');
+    blk.append(kv([
+      ['session', r.session_id ?? h('span', { class: 'muted' }, 'none yet')],
+      ['directory', r.dir],
+      at('queued_at') && ['queued', fmtDateTime(at('queued_at'))],
+      started && ['started', fmtDateTime(started)],
+      finished && ['finished', [fmtDateTime(finished), started ? ` (took ${fmtDuration(finished - started)})` : '']],
+      r.cost_usd != null && ['cost', fmtCost(r.cost_usd)],
+    ]));
+    if (r.result != null) blk.append(h('pre', { class: 'result' }, r.result));
+    else if (r.status === 'done') blk.append(h('p', { class: 'notice muted' }, 'The session ended without a final message.'));
+    if (r.resume_command) blk.append(cmdRow(`copy:resume:${key}`, r.resume_command));
+  }
+  const label2 = !r ? 'research' : r.status === 'failed' ? 'retry' : r.status === 'done' ? 're-run' : null;
+  if (label2) blk.append(h('div', { class: 'actions' }, researchButton(key, label2, r), actionError(key, r)));
+  return blk;
+}
+
+function worktreeConds(w) {
+  const pr = w.pr;
+  if (!pr) return [{ mark: '·', text: 'no PR for this branch' }];
+  if (pr.state === 'merged') return [{ mark: '✓', cls: 'violet', text: `PR #${pr.number} merged into ${pr.base}` }];
+  if (pr.state === 'closed') return [{ mark: '·', text: `PR #${pr.number} closed without merging` }];
+  if (pr.state !== 'open') throw new Error(`PR #${pr.number} has unknown state ${JSON.stringify(pr.state)}`);
+  const out = [];
+  if (pr.draft) out.push({ mark: '·', text: 'the PR is a draft: nothing below starts research until it is ready for review' });
+
+  const failing = failingChecks(pr);
+  const unfinished = unfinishedChecks(pr);
+  const checkItem = (c) => (c.url ? extLink(c.url, `${c.name} ↗`) : c.name);
+  switch (pr.ci_result) {
+    case 'pass': out.push({ mark: '✓', text: `CI passes (${pr.checks.length} checks)` }); break;
+    case 'fail': {
+      const running = unfinished.length ? `, ${unfinished.length} still running` : '';
+      out.push({ mark: '!', cls: 'red', text: `CI fails: ${failing.length} of ${pr.checks.length} checks${running}`, sub: failing.map(checkItem) });
+      break;
+    }
+    case 'pending':
+      out.push({ mark: '·', text: `CI running: ${pr.checks.length - unfinished.length} of ${pr.checks.length} checks finished`, sub: unfinished.map(checkItem) });
+      break;
+    case 'none': out.push({ mark: '·', text: 'no CI checks on the PR head' }); break;
+    default: throw new Error(`PR #${pr.number} has unknown ci_result ${JSON.stringify(pr.ci_result)}`);
+  }
+
+  if (pr.approved.length) out.push({ mark: '✓', text: `approved by ${list(pr.approved)}` });
+  else if (pr.requested.length) out.push({ mark: '·', text: `no approval yet; review requested from ${list(pr.requested)}` });
+  else out.push({ mark: '·', text: 'no approval yet, and no review requested' });
+  if (pr.changes_requested.length) out.push({ mark: '!', text: `changes requested by ${list(pr.changes_requested)}` });
+  if (pr.commented.length) out.push({ mark: '·', text: `commented without a verdict: ${list(pr.commented)}` });
+
+  if (pr.threads_unresolved > 0) {
+    out.push({
+      mark: '!',
+      text: `${pr.threads_unresolved} of ${pr.threads_total} review threads unresolved`,
+      sub: pr.unresolved_threads.map((t) => [
+        extLink(t.url, t.path ?? 'conversation'),
+        h('span', { class: 'muted' }, ` by ${t.author}${t.outdated ? ', outdated' : ''}`),
+      ]),
+    });
+  } else if (pr.threads_total > 0) {
+    out.push({ mark: '✓', text: `all ${pr.threads_total} review threads resolved` });
+  } else {
+    out.push({ mark: '·', text: 'no review threads' });
+  }
+
+  if (pr.mergeable === true) out.push({ mark: '✓', text: `merges cleanly into ${pr.base}` });
+  else if (pr.mergeable === false) out.push({ mark: '!', text: `conflicts with ${pr.base}` });
+  else out.push({ mark: '·', text: 'GitHub has yet to compute whether it merges cleanly' });
+  return out;
+}
+
+function worktreeNext(w, base) {
+  const pr = w.pr;
+  switch (w.state) {
+    case 'needs':
+      return w.triggers.map((t) => {
+        const r = t.research;
+        const resume = r?.resume_command && { k: `copy:next:${r.key}`, text: r.resume_command };
+        if (t.kind === 'ci-failure' && unfinishedChecks(pr).length && (!r || r.stale)) {
+          const when = r ? 'covers an earlier head, and runs again' : 'starts';
+          return { text: `Research ${t.name} ${when} once every check has finished; start it above to research the failures so far.`, cmd: resume };
+        }
+        if (!r) return { text: `Research ${t.name} has not started; start it above.` };
+        if (r.status === 'queued' || r.status === 'running') return { text: `Research ${t.name} is underway; its conclusions show up here when it finishes.` };
+        if (r.status === 'failed') return { text: `Research ${t.name} failed: retry it, or resume its session to see what happened.`, cmd: resume };
+        return { text: `Read the conclusions of research ${t.name} and act on them in its session.`, cmd: resume };
+      });
+    case 'ready':
+      if (base && base.pr.state === 'open') {
+        return [{ text: `Merge after #${base.pr.number} (${base.branch}) merges.`, link: { url: base.pr.url, label: `#${base.pr.number} ↗` } }];
+      }
+      return [{ text: 'Merge the PR.', link: { url: pr.url, label: 'merge ↗' } }];
+    case 'waiting': {
+      const out = [];
+      if (pr.ci_result === 'pending') out.push({ text: 'Wait for CI to finish.', link: { url: `${pr.url}/checks`, label: 'checks ↗' } });
+      if (!pr.approved.length) {
+        out.push(pr.requested.length
+          ? { text: `Wait for a review from ${list(pr.requested)}.`, link: { url: pr.url, label: `#${pr.number} ↗` } }
+          : { text: 'Ask someone for a review.', link: { url: pr.url, label: `#${pr.number} ↗` } });
+      }
+      if (pr.mergeable === null) out.push({ text: 'GitHub has yet to compute whether the PR merges cleanly; the next refresh shows it.' });
+      if (pr.ci_result === 'none') out.push({ text: 'No CI checks ran on the PR head; check that CI triggers for this branch.', link: { url: `${pr.url}/checks`, label: 'checks ↗' } });
+      return out;
+    }
+    case 'local':
+      return pr
+        ? [{ text: 'Mark the PR ready for review when it is done.', link: { url: pr.url, label: `#${pr.number} ↗` } }]
+        : [{ text: 'Push the branch and open a PR when it is ready.' }];
+    case 'done':
+      if (pr.state === 'closed') return [{ text: 'The PR was closed without merging.', link: { url: pr.url, label: `#${pr.number} ↗` } }];
+      if (!w.remove_command) throw new Error(`worktree ${worktreeId(w)} has a merged PR but no remove_command`);
+      return [{ text: 'The PR is merged: remove the worktree.', cmd: { k: 'copy:next:remove', text: w.remove_command } }];
+  }
+  throw new Error(`worktree ${worktreeId(w)} has unknown state ${JSON.stringify(w.state)}`);
+}
+
+function worktreeDetail(w) {
+  const pr = w.pr;
+  const meta = worktreeState(w);
+  const base = stackedOn(w);
+  const research = w.triggers.length
+    ? w.triggers.map((t) => researchBlock(t.research, t.key, t.name))
+    : h('p', { class: 'muted' }, pr?.state === 'open' && !pr.draft
+      ? 'No research: nothing on the PR needs you.'
+      : 'No research: it runs only for open PRs that are ready for review.');
+  const local = kv([
+    ['badges', w.badges.length ? w.badges.map((b) => h('span', { class: 'badge' }, b)) : h('span', { class: 'muted' }, 'none')],
+    ['dirty submodules', w.dirty_submodules.length
+      ? w.dirty_submodules.map((p) => h('div', null, p, h('span', { class: 'muted' }, ' (ignored)')))
+      : h('span', { class: 'muted' }, 'none')],
+    ['head', w.head],
+    pr && pr.head !== w.head && ['PR head', pr.head],
+    ['path', w.path],
+  ]);
+  return [
+    crumb('worktrees', w.branch ?? w.path),
+    h('div', { class: 'dhead' },
+      h('h1', { tabindex: '-1' }, pr ? pr.title : (w.branch ?? w.path)),
+      h('div', { class: 'dmeta' },
+        chip(meta.label, meta.cls),
+        pr && extLink(pr.url, `#${pr.number} ↗`),
+        h('span', { class: 'flow' },
+          w.branch ?? '(detached)',
+          pr && [h('span', { class: 'muted' }, ' → '), pr.base, base ? h('span', { class: 'muted' }, ` (#${base.pr.number})`) : null]))),
+    h('div', { class: 'dgrid' },
+      h('div', { class: 'dmain' },
+        panel(`Why ${meta.label}`, conds(worktreeConds(w))),
+        panel('Research', research),
+        panel('Next', nextList(worktreeNext(w, base)))),
+      h('aside', { class: 'dside' },
+        panel('local', local),
+        linksPanel(pr?.url))),
+  ];
+}
+
+function requestConds(r) {
+  const res = r.research;
+  const out = [];
+  switch (r.state) {
+    case 'new':
+      if (!res) out.push({ mark: '·', text: 'no research yet' });
+      else if (res.status === 'queued') out.push({ mark: '◌', text: 'research queued' });
+      else if (res.status === 'running') out.push({ mark: '◌', text: ['researching for ', elapsedSpan(res)] });
+      else if (res.status === 'failed') out.push({ mark: '!', cls: 'red', text: `research failed: ${res.reason}` });
+      else throw new Error(`review request #${r.number} is new while its research is ${JSON.stringify(res.status)}`);
+      break;
+    case 'researched':
+      out.push({ mark: '✓', text: `the research looked at the PR's current head ${r.head}` });
+      break;
+    case 'outdated':
+      out.push({ mark: '!', text: `the author pushed after the research ran; the PR head is ${r.head} now` });
+      break;
+  }
+  const asked = fmtDate(parseTime(r.created_at, `created_at of review request #${r.number}`));
+  out.push(r.recent
+    ? { mark: '·', text: `asked ${asked}, within the last ${state.recent_days} days: research starts on arrival` }
+    : { mark: '·', text: `asked ${asked}, more than ${state.recent_days} days ago: research starts only on request` });
+  return out;
+}
+
+function requestNext(r) {
+  const res = r.research;
+  const prLink = { url: r.url, label: `#${r.number} ↗` };
+  const resume = res?.resume_command && { k: `copy:next:${res.key}`, text: res.resume_command };
+  if (!res) return [{ text: 'Start the research above, or review the PR yourself.', link: prLink }];
+  if (res.status === 'queued' || res.status === 'running') return [{ text: 'The research is underway; its conclusions show up here when it finishes.', link: prLink }];
+  if (res.status === 'failed') return [{ text: 'The research failed: retry it, or resume its session to see what happened.', cmd: resume, link: resume ? null : prLink }];
+  if (r.state === 'outdated') return [{ text: 'Re-run the research on the new head, or resume the old session.', cmd: resume, link: resume ? null : prLink }];
+  return [{ text: "Read the research's conclusions in its session, then review the PR.", cmd: resume, link: resume ? null : prLink }];
+}
+
+function requestDetail(r) {
+  const meta = requestState(r);
+  const asked = parseTime(r.created_at, `created_at of review request #${r.number}`);
+  return [
+    crumb('review requests', `#${r.number}`),
+    h('div', { class: 'dhead' },
+      h('h1', { tabindex: '-1' }, r.title),
+      h('div', { class: 'dmeta' },
+        chip(meta.label, meta.cls),
+        extLink(r.url, `#${r.number} ↗`),
+        h('span', null, `by ${r.author} · asked ${fmtDate(asked)}`))),
+    h('div', { class: 'dgrid' },
+      h('div', { class: 'dmain' },
+        panel(`Why ${meta.label}`, conds(requestConds(r))),
+        panel('Research', researchBlock(r.research, r.key, r.name)),
+        panel('Next', nextList(requestNext(r)))),
+      h('aside', { class: 'dside' },
+        panel('pr', kv([
+          ['repo', state.repo],
+          ['author', r.author],
+          ['asked', fmtDateTime(asked)],
+          ['head', r.head],
+        ])),
+        linksPanel(r.url))),
+  ];
+}
+
+function message(title, ...lines) {
+  return h('div', { class: 'message', role: 'alert' }, h('h1', null, title), lines.map((l) => h('p', { class: 'soft' }, l)));
+}
+
+function renderView() {
+  if (!token) {
+    return message('No access token.',
+      'Open the URL that the monitor server printed when it started; it ends in #token=….');
+  }
+  if (authError) {
+    return message('The server rejected this page’s token.',
+      'Each server start makes a new token. Open the URL the server printed when it last started.');
+  }
+  const view = [renderTop(), renderNotices()];
+  if (!state) view.push(h('p', { class: 'notice muted' }, loadError ? 'No state loaded yet.' : 'Loading…'));
+  else view.push(route.item ? renderDetail(route.item) : renderList());
+  return view;
+}
+
+function render() {
+  const focused = document.activeElement?.closest?.('[data-k]')?.dataset.k;
+  const scrollLefts = new Map([...document.querySelectorAll('.scroll[data-k]')].map((e) => [e.dataset.k, e.scrollLeft]));
+  const y = window.scrollY;
+  let view;
+  try {
+    view = renderView();
+  } catch (e) {
+    console.error(e);
+    view = [renderTopSafe(), message('This page cannot show the state the server sent.', e.message)];
+  }
+  app.replaceChildren(add(document.createDocumentFragment(), view));
+  for (const el of document.querySelectorAll('.scroll[data-k]')) {
+    const left = scrollLefts.get(el.dataset.k);
+    if (left) el.scrollLeft = left;
+  }
+  if (focused) byKey(focused)?.focus({ preventScroll: true });
+  document.title = titleText();
+  window.scrollTo(0, y);
+}
+
+function renderTopSafe() {
+  try {
+    return renderTop();
+  } catch {
+    return null;
+  }
+}
+
+function titleText() {
+  if (!state) return 'monitor';
+  const needs = state.worktrees.filter((w) => w.state === 'needs').length;
+  return `${needs ? `(${needs}) ` : ''}monitor · ${state.repo}`;
+}
+
+function onHashChange() {
+  const before = route.item;
+  const hadToken = token;
+  if (!before) listScrollY = window.scrollY;
+  readHash();
+  if (token !== hadToken) {
+    load();
+    schedulePoll();
+  }
+  render();
+  if (route.item && route.item !== before) {
+    window.scrollTo(0, 0);
+    app.querySelector('h1[tabindex]')?.focus({ preventScroll: true });
+  } else if (!route.item && before) {
+    window.scrollTo(0, listScrollY);
+    byKey(`open:${before}`)?.focus({ preventScroll: true });
+  }
+}
+
+readHash();
+render();
+load().then(schedulePoll);
+setInterval(tick, 1000);
+window.addEventListener('hashchange', onHashChange);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    load();
+    schedulePoll();
+  }
+});
+</script>
+</body>
+</html>

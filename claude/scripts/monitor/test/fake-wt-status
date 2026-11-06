@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+// Stands in for wt-status in the server's tests, so that no test reaches
+// GitHub.
+//
+// Appends its arguments to $FAKE_WT_STATUS_DIR/calls.log as a JSON line, waits
+// while $FAKE_WT_STATUS_DIR/hold exists, then fails as
+// $FAKE_WT_STATUS_DIR/fail.json says ({ "stderr", "code" }) when that exists,
+// or prints $FAKE_WT_STATUS_DIR/snapshot.json.
+import fs from "node:fs";
+import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+
+const dir = process.env.FAKE_WT_STATUS_DIR;
+if (!dir) {
+  console.error("fake-wt-status: FAKE_WT_STATUS_DIR is not set");
+  process.exit(1);
+}
+fs.appendFileSync(
+  path.join(dir, "calls.log"),
+  `${JSON.stringify(process.argv.slice(2))}\n`,
+);
+const deadline = Date.now() + 30_000;
+while (fs.existsSync(path.join(dir, "hold"))) {
+  if (Date.now() > deadline) {
+    console.error("fake-wt-status: never released");
+    process.exit(1);
+  }
+  await sleep(20);
+}
+const failFile = path.join(dir, "fail.json");
+if (fs.existsSync(failFile)) {
+  const { stderr, code } = JSON.parse(fs.readFileSync(failFile, "utf8"));
+  process.stderr.write(stderr);
+  process.exit(code);
+}
+process.stdout.write(fs.readFileSync(path.join(dir, "snapshot.json")));

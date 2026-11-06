@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Remove the worktree of a branch whose PR is merged, and delete the branch.
+#
+#   wt-remove <branch>
+#
+# Refuses unless the branch's PR on GitHub is merged, the worktree has no
+# uncommitted or untracked files, and every commit on the local branch is in the
+# merged PR. A squash merge leaves the branch's own commits out of the base, so
+# git alone cannot tell that the branch was merged: the PR's state decides.
+set -euo pipefail
+shopt -s inherit_errexit
+source "$(dirname "${BASH_SOURCE[0]}")/wt-lib.sh"
+
+[[ $# -eq 1 ]] || die "usage: wt-remove <branch>"
+branch=$1
+
+worktrees=$(git worktree list --porcelain)
+main=$(sed -n '1s/^worktree //p' <<<"$worktrees")
+dir=$(awk -v want="branch refs/heads/$branch" '/^worktree /{wt=substr($0, 10)} $0 == want {print wt}' <<<"$worktrees")
+[[ -n $dir ]] || die "no worktree has $branch checked out"
+[[ $dir != "$main" ]] || die "$branch is checked out in the main checkout $main, which is not a worktree to remove"
+
+dirty=$(git -C "$dir" status --porcelain)
+[[ -z $dirty ]] || die "$dir has uncommitted or untracked files:"$'\n'"$dirty"
+
+repo=$(github_repo "$main" origin)
+prs=$(branch_prs "$repo" "$branch")
+
+merged=$(jq -r 'first(.[] | select(.merged_at != null) | "\(.number) \(.head.sha)") // empty' <<<"$prs")
+if [[ -z $merged ]]; then
+  found=$(jq -r 'map("#\(.number) \(.state)") | join(", ")' <<<"$prs")
+  die "$branch has no merged PR in $repo (PRs: ${found:-none})"
+fi
+read -r number head_sha <<<"$merged"
+
+# The merged PR's head may be a commit this clone never had, such as one pushed
+# from elsewhere.
+git_https -C "$main" fetch -q origin "refs/pull/$number/head" >&2
+rc=0
+git -C "$main" merge-base --is-ancestor "refs/heads/$branch" "$head_sha" || rc=$?
+case $rc in
+  0) ;;
+  1) die "$branch has commits that are not in merged PR #$number (head $head_sha):"$'\n'"$(git -C "$main" log --oneline "$head_sha..refs/heads/$branch")" ;;
+  *) die "could not compare $branch with the head $head_sha of merged PR #$number (git merge-base exited with $rc)" ;;
+esac
+
+# git refuses to remove a worktree with submodules unless forced; the status
+# check above already found nothing in it that would be lost.
+git -C "$main" worktree remove --force "$dir" >&2
+git -C "$main" branch -D "$branch" >&2
+
+# git leaves behind the directories that the slashes in a branch name created.
+parent=$(dirname "$dir")
+while [[ $parent == "$main/.claude/worktrees/"* ]] && rmdir "$parent" 2>/dev/null; do
+  parent=$(dirname "$parent")
+done
